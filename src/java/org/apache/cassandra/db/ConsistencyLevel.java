@@ -49,10 +49,12 @@ public enum ConsistencyLevel
     LOCAL_SERIAL(9),
     LOCAL_ONE   (10, true),
     CASTHREE    (11),
-    CASFIVE     (12);
+    CASFIVE     (12),
+    BSR         (13);
 
     private static final Logger logger = LoggerFactory.getLogger(ConsistencyLevel.class);
 
+    public static int ByzantineFaultTolerance = 1;
     // Used by the binary protocol
     public final int code;
     private final boolean isDCLocal;
@@ -71,12 +73,12 @@ public enum ConsistencyLevel
         }
     }
 
-    private ConsistencyLevel(int code)
+    ConsistencyLevel(int code)
     {
         this(code, false);
     }
 
-    private ConsistencyLevel(int code, boolean isDCLocal)
+    ConsistencyLevel(int code, boolean isDCLocal)
     {
         this.code = code;
         this.isDCLocal = isDCLocal;
@@ -87,6 +89,11 @@ public enum ConsistencyLevel
         if (code < 0 || code >= codeIdx.length)
             throw new ProtocolException(String.format("Unknown code %d for a consistency level", code));
         return codeIdx[code];
+    }
+
+    private int bsrFor(Keyspace keyspace)
+    {
+        return keyspace.getReplicationStrategy().getReplicationFactor() - ByzantineFaultTolerance;
     }
 
     private int quorumFor(Keyspace keyspace)
@@ -110,6 +117,8 @@ public enum ConsistencyLevel
     {
         switch (this)
         {
+            case BSR:
+                return bsrFor(keyspace);
             case CASTHREE:
                 return casFor(keyspace,3);
             case CASFIVE:
@@ -172,7 +181,7 @@ public enum ConsistencyLevel
     {
         NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) keyspace.getReplicationStrategy();
 
-        Map<String, Integer> dcEndpoints = new HashMap<String, Integer>();
+        Map<String, Integer> dcEndpoints = new HashMap<>();
         for (String dc: strategy.getDatacenters())
             dcEndpoints.put(dc, 0);
 
