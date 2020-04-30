@@ -159,7 +159,7 @@ public abstract class AbstractReadExecutor
      */
     public abstract void executeAsync();
 
-    public void executeAsyncAbd()
+    public void executeAsyncBSR()
     {
         // we don't need digest read for ABD,
         // all read requests issued are data requests
@@ -411,7 +411,7 @@ public abstract class AbstractReadExecutor
         }
     }
 
-    public void awaitResponsesAbd() throws ReadTimeoutException
+    public void awaitResponsesBSR() throws ReadTimeoutException
     {
         try
         {
@@ -433,7 +433,7 @@ public abstract class AbstractReadExecutor
         // when we get here, the consistency level must have been satisfied
         // this function is implemented in digest resolver because the data
         // responses are in it
-        ReadResponse maxResponse = digestResolver.getMaxResponse();
+        ReadResponse maxResponse = digestResolver.getBSRResponse();
 
 
         if(maxResponse != null)

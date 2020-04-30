@@ -19,6 +19,8 @@ package org.apache.cassandra.service.reads;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.PriorityBlockingQueue;
+import java.util.Collections;
 
 import com.google.common.base.Preconditions;
 
@@ -31,8 +33,8 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.service.ABDColumns;
-import org.apache.cassandra.service.ABDTag;
+import org.apache.cassandra.service.LogicalTimestampColumns;
+import org.apache.cassandra.service.LogicalTimestamp;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -94,14 +96,44 @@ public class DigestResolver extends ResponseResolver
         return true;
     }
 
-    public ReadResponse getMaxResponse()
+    private class TagResponsePair implements Comparable<TagResponsePair>
+    {
+        private LogicalTimestamp tag;
+        private ReadResponse response;
+
+        public TagResponsePair(LogicalTimestamp tag, ReadResponse response)
+        {
+            this.tag = tag;
+            this.response = response;
+        }
+
+        public int compareTo(TagResponsePair other)
+        {
+            return this.tag.compareTo(other.tag);
+        }
+
+        public LogicalTimestamp getTag() {
+            return this.tag;
+        }
+
+        public ReadResponse getResponse() {
+            return this.response;
+        }
+    }
+
+    public ReadResponse getBSRResponse()
     {
         // check all data responses,
         // extract the one with max z value
-        ABDTag maxTag = new ABDTag();
+        LogicalTimestamp maxTag = new LogicalTimestamp();
         ReadResponse maxResponse = null;
 
-        ColumnIdentifier zIdentifier = new ColumnIdentifier(ABDColumns.TAG, true);
+        // TODO: find a way to get this from the replication factor
+        // Store results in a maxheap so we can get the (f+1)th highest tag
+        int replicationFactor = 20;
+        PriorityBlockingQueue<TagResponsePair> sortedTags = new PriorityBlockingQueue<>(replicationFactor, Collections.reverseOrder());
+
+        ColumnIdentifier zIdentifier = new ColumnIdentifier(LogicalTimestampColumns.TAG, true);
         for (MessageIn<ReadResponse> message : responses)
         {
             ReadResponse curResponse = message.payload;
@@ -120,27 +152,34 @@ public class DigestResolver extends ResponseResolver
                 RowIterator ri = pi.next();
                 while(ri.hasNext())
                 {
-                    ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(ABDColumns.TAG));
+                    ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
                     Row r = ri.next();
 
                     // todo: the entire row is read for the sake of development
                     // future improvement could be made
 
-                    ABDTag curTag = new ABDTag();
+                    LogicalTimestamp curTag = new LogicalTimestamp();
                     Cell tagCell = r.getCell(tagMetaData);
-                    ABDTag readingTag = ABDTag.deserialize(tagCell.value());
+                    LogicalTimestamp readingTag = LogicalTimestamp.deserialize(tagCell.value());
                     if(tagCell!=null && readingTag!=null){
                         curTag = readingTag;
                     }
 
-                    if(curTag.isLarger(maxTag))
-                    {
-                        maxTag = curTag;
-                        maxResponse = curResponse;
-                    }
+                    // add tag to max heap
+                    sortedTags.add(new TagResponsePair(curTag, curResponse));
                 }
             }
         }
+
+        // remove max values for f+1 iterations
+        for (int i = 0; i < ConsistencyLevel.ByzantineFaultTolerance + 1; i++) {
+            TagResponsePair nthMax = sortedTags.poll();
+            if (nthMax != null)
+            {
+               maxResponse = nthMax.getResponse();
+            }
+        }
+
         return maxResponse;
     }
 

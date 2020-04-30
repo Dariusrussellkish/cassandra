@@ -47,7 +47,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.ABDColumns;
+import org.apache.cassandra.service.LogicalTimestampColumns;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageProxy;
@@ -222,7 +222,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     public static  SinglePartitionReadCommand tagRead(TableMetadata metadata, int nowInSec, DecoratedKey key){
         ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(Slices.ALL, false);
 
-        ColumnMetadata c = metadata.getColumn(ByteBufferUtil.bytes(ABDColumns.TAG));
+        ColumnMetadata c = metadata.getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
         BTreeSet.Builder<ColumnMetadata> tagCol = BTreeSet.builder(naturalOrder());
         tagCol.add(c);
         RegularAndStaticColumns cols = new RegularAndStaticColumns(Columns.NONE, Columns.from(tagCol.build()));

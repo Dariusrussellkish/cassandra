@@ -691,52 +691,45 @@ public class StorageProxy implements StorageProxyMBean
 
         long startTime = System.nanoTime();
 
-        // ABD get
+        // BSR get
         // create an read command to fetch the z value corresponding to the key
-        List<SinglePartitionReadCommand> tagReadList = new ArrayList<>();
-        for (IMutation mutation : mutations)
-        {
-            // todo: please note that this is not optimal,
-            // fullPartitionRead generates a read that reading ALL
-            // columns of the key, while all we need is ts
-            TableMetadata tableMetadata = mutation.getPartitionUpdates().iterator().next().metadata();
-            int nowInSec = FBUtilities.nowInSeconds();
-            DecoratedKey  decoratedKey =  mutation.key();
+        // TODO: extend to allow multiple mutations
+        IMutation mut = (IMutation) mutations.toArray()[0];
+        TableMetadata tableMetadata = mut.getPartitionUpdates().iterator().next().metadata();
+        int nowInSec = FBUtilities.nowInSeconds();
+        DecoratedKey decoratedKey = mut.key();
 
-            SinglePartitionReadCommand tagRead = SinglePartitionReadCommand.fullPartitionRead(
-                                                        tableMetadata,
-                                                        nowInSec,
-                                                        decoratedKey
-                                                        );
+        SinglePartitionReadCommand tagRead = SinglePartitionReadCommand.fullPartitionRead(
+                tableMetadata,
+                nowInSec,
+                decoratedKey
+        );
 
-//            SinglePartitionReadCommand tagRead = SinglePartitionReadCommand.tagRead(
-//                                                        tableMetadata,
-//                                                        nowInSec,
-//                                                        decoratedKey
-//                                                        );
-            tagReadList.add(tagRead);
-        }
-
-        HashMap<String, ABDTag> maxTsMap = new HashMap<>();
-        List<ReadResponse> readList = fetchTagValue(tagReadList, System.nanoTime());
-        PartitionIterator zValueReadResult = prepIterator(tagReadList, readList);
+        HashMap<String, LogicalTimestamp> maxTsMap = new HashMap<>();
+        // TODO: extend to allow multiple mutations
+        ReadResponse read = fetchTagValueBSR(tagRead, System.nanoTime());
+        List<ReadResponse> readList = new ArrayList<>();
+        List<SinglePartitionReadCommand> commandList = new ArrayList<>();
+        readList.add(read);
+        commandList.add(tagRead);
+        PartitionIterator zValueReadResult = prepIterator(commandList, readList);
 
         while(zValueReadResult.hasNext())
         {
             RowIterator ri = zValueReadResult.next();
-            ColumnMetadata colMeta = ri.metadata().getColumn(ByteBufferUtil.bytes(ABDColumns.TAG));
+            ColumnMetadata colMeta = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
 
             while(ri.hasNext())
             {
                 Cell c = ri.next().getCell(colMeta);
                 if (c != null) {
-                    ABDTag maxTag = ABDTag.deserialize(c.value());
+                    LogicalTimestamp maxTag = LogicalTimestamp.deserialize(c.value());
                     maxTsMap.put(ri.partitionKey().toString(), maxTag);
                 }
             }
         }
 
-        // ABD put
+        // BSR put
         // for each incoming mutation,
         // create a mutation for modifying its z value
         // please note that we have 2 assumptions
@@ -748,15 +741,15 @@ public class StorageProxy implements StorageProxyMBean
         {
             Mutation.SimpleBuilder mutationBuilder = Mutation.simpleBuilder(mutation.getKeyspaceName(), mutation.key());
 
-            TableMetadata tableMetadata = mutation.getPartitionUpdates().iterator().next().metadata();
+            tableMetadata = mutation.getPartitionUpdates().iterator().next().metadata();
             long timeStamp = FBUtilities.timestampMicros();
             boolean containsKey = maxTsMap.containsKey(mutation.key().toString());
-            ABDTag curTag =  containsKey ? maxTsMap.get(mutation.key().toString()) : new ABDTag();
+            LogicalTimestamp curTag =  containsKey ? maxTsMap.get(mutation.key().toString()) : new LogicalTimestamp();
 
             mutationBuilder.update(tableMetadata)
                     .timestamp(timeStamp)
                     .row()
-                    .add(ABDColumns.TAG,ABDTag.serialize(curTag.nextTag()));
+                    .add(LogicalTimestampColumns.TAG, LogicalTimestamp.serialize(curTag.nextTag()));
 
             Mutation zValueMutation = mutationBuilder.build();
 
@@ -769,7 +762,7 @@ public class StorageProxy implements StorageProxyMBean
             newMutations.add(newMutation);
         }
 
-        mutateDoWrite(newMutations, ConsistencyLevel.QUORUM, System.nanoTime());
+        mutateDoWrite(newMutations, ConsistencyLevel.BSR, System.nanoTime());
     }
 
     /**
@@ -1888,7 +1881,7 @@ public class StorageProxy implements StorageProxyMBean
         // the original fetchRows will be used, this is a workaround
         // to the initialization failure issue
         SinglePartitionReadCommand incomingRead = commands.iterator().next();
-        ColumnMetadata tagMetadata = incomingRead.metadata().getColumn(ByteBufferUtil.bytes(ABDColumns.TAG));
+        ColumnMetadata tagMetadata = incomingRead.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
         if(tagMetadata != null)
             return fetchRowsAbd(commands);
 
@@ -1955,8 +1948,10 @@ public class StorageProxy implements StorageProxyMBean
         // execute the tag value read, the result will be the
         // tag value pair with the largest tag
 
-        List<ReadResponse> tagValueResult = fetchTagValue(tagValueReadList, System.nanoTime());
-        PartitionIterator pi = prepIterator(commands, tagValueResult);
+        ReadResponse tagValueResult = fetchTagValueBSR(tagValueReadList.get(0), System.nanoTime());
+        List<ReadResponse> tagValueResultList = new ArrayList<>();
+        tagValueResultList.add(tagValueResult);
+        PartitionIterator pi = prepIterator(commands, tagValueResultList);
 
         List<IMutation> mutationList = new ArrayList<>();
         // write the tag value pair with the largest tag to all servers
@@ -1965,8 +1960,8 @@ public class StorageProxy implements StorageProxyMBean
             // first we have to parse the value and tag from the result
             // tagValueResult.next() returns a RowIterator
             RowIterator ri = pi.next();
-            ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(ABDColumns.TAG));
-            ColumnMetadata valMetadata = ri.metadata().getColumn(ByteBufferUtil.bytes(ABDColumns.VAL));
+            ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
+            ColumnMetadata valMetadata = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.VAL));
 
             assert tagMetaData != null && valMetadata != null;
 
@@ -1974,7 +1969,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 Row r = ri.next();
 
-                ABDTag tag = ABDTag.deserialize(r.getCell(tagMetaData).value());
+                LogicalTimestamp tag = LogicalTimestamp.deserialize(r.getCell(tagMetaData).value());
 
                 String value = "";
                 try{
@@ -1989,8 +1984,8 @@ public class StorageProxy implements StorageProxyMBean
 
                 mutationBuilder.update(tableMetadata)
                         .timestamp(FBUtilities.timestampMicros()).row()
-                        .add(ABDColumns.TAG, ABDTag.serialize(tag))
-                        .add(ABDColumns.VAL, value);
+                        .add(LogicalTimestampColumns.TAG, LogicalTimestamp.serialize(tag))
+                        .add(LogicalTimestampColumns.VAL, value);
 
                 Mutation tvMutation = mutationBuilder.build();
 
@@ -1998,47 +1993,24 @@ public class StorageProxy implements StorageProxyMBean
             }
 
 
-            // then we will have to perform the mutatation we've just generated
+            // then we will have to perform the mutation we've just generated
             mutateDoWrite(mutationList, ConsistencyLevel.QUORUM, System.nanoTime());
         }
 
-        return prepIterator(commands, tagValueResult);
+        return prepIterator(commands, tagValueResultList);
     }
 
-    private static List<ReadResponse> fetchTagValue(List<SinglePartitionReadCommand> commands, long queryStartNanoTime)
+    // gets the f+1 highest value
+    private static ReadResponse fetchTagValueBSR(SinglePartitionReadCommand command, long queryStartNanoTime)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
-        int cmdCount = commands.size();
 
-        AbstractReadExecutor[] reads = new AbstractReadExecutor[cmdCount];
-
-        for (int i=0; i<cmdCount; i++)
-        {
-            reads[i] = AbstractReadExecutor.getReadExecutor(commands.get(i), ConsistencyLevel.QUORUM, queryStartNanoTime);
-        }
-
-        for (int i=0; i<cmdCount; i++)
-        {
-            reads[i].executeAsyncAbd();
-        }
-
-        for (int i=0; i<cmdCount; i++)
-        {
-            reads[i].maybeTryAdditionalReplicas();
-        }
-
-        for (int i=0; i<cmdCount; i++)
-        {
-            reads[i].awaitResponsesAbd();
-        }
-    
-        List<ReadResponse> results = new ArrayList<>();
-
-        for (int i=0; i<cmdCount; i++)
-        {
-            results.add(reads[i].getResult());
-        }
-        return results;
+        AbstractReadExecutor read = AbstractReadExecutor.getReadExecutor(command, ConsistencyLevel.BSR, queryStartNanoTime);
+        read.executeAsyncBSR();
+        read.maybeTryAdditionalReplicas();
+        // gets the f+1 highest value from responses
+        read.awaitResponsesBSR();
+        return read.getResult();
     }
 
     private static PartitionIterator prepIterator (List<SinglePartitionReadCommand> commands, List<ReadResponse> responses) {

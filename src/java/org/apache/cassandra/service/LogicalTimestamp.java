@@ -10,17 +10,18 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class ABDTag implements Serializable{
+public class LogicalTimestamp implements Serializable, Comparable<LogicalTimestamp>
+{
     private int logicalTIme;
     private String writerId ;
     private static final Logger logger = LoggerFactory.getLogger(StorageProxy.class);
 
-    public ABDTag(){
+    public LogicalTimestamp(){
         this.logicalTIme = -1;
         this.writerId = FBUtilities.getLocalAddressAndPort().toString(false);
     }
 
-    private ABDTag(String tagString){
+    private LogicalTimestamp(String tagString){
         String[] tagArray = tagString.split(";");
         this.logicalTIme = Integer.parseInt(tagArray[0]);
         this.writerId = tagArray[1];
@@ -35,32 +36,41 @@ public class ABDTag implements Serializable{
         return writerId;
     }
 
-    public ABDTag nextTag(){
+    public LogicalTimestamp nextTag(){
         this.logicalTIme++;
         return this;
     }
 
-    public static String serialize(ABDTag tag) {
+    public static String serialize(LogicalTimestamp tag) {
         return tag.toString();
     }
 
-    public static ABDTag deserialize(ByteBuffer buf) {
-        String tagString = "";
+    public static LogicalTimestamp deserialize(ByteBuffer buf) {
+        String tagString;
         try {
             tagString = ByteBufferUtil.string(buf);
         } catch (CharacterCodingException e){
-            logger.warn("err casting tag {}",e);
-            return new ABDTag();
+            logger.warn("err casting tag {}", e);
+            return new LogicalTimestamp();
         }
 
-        return new ABDTag(tagString);
+        return new LogicalTimestamp(tagString);
     }
 
-    public boolean isLarger(ABDTag other){
+    public boolean isLarger(LogicalTimestamp other){
         if(this.logicalTIme != other.getTime()){
             return this.logicalTIme - other.getTime() > 0;
         } else {
             return this.writerId.compareTo(other.getWriterId()) > 0;
+        }
+    }
+
+    public int compareTo(LogicalTimestamp other)
+    {
+        if (this.logicalTIme != other.getTime()) {
+            return this.logicalTIme - other.getTime();
+        } else {
+            return this.writerId.compareTo(other.getWriterId());
         }
     }
 
