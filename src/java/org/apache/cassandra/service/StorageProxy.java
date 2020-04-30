@@ -19,6 +19,7 @@ package org.apache.cassandra.service;
 
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
@@ -1884,7 +1885,7 @@ public class StorageProxy implements StorageProxyMBean
         SinglePartitionReadCommand incomingRead = commands.iterator().next();
         ColumnMetadata tagMetadata = incomingRead.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
         if(tagMetadata != null)
-            return fetchRowsBSR(commands);
+            return fetchRowsBSR(commands, queryStartNanoTime);
 
         int cmdCount = commands.size();
 
@@ -1931,8 +1932,8 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     private static class TagUnfilteredPartitionIteratorPair {
-        private LogicalTimestamp timestamp;
-        private UnfilteredPartitionIterator partitionIterator;
+        private final LogicalTimestamp timestamp;
+        private final UnfilteredPartitionIterator partitionIterator;
 
         public TagUnfilteredPartitionIteratorPair(LogicalTimestamp timestamp, UnfilteredPartitionIterator partitionIterator)
         {
@@ -1949,7 +1950,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static PartitionIterator fetchRowsBSR(List<SinglePartitionReadCommand> commands)
+    private static PartitionIterator fetchRowsBSR(List<SinglePartitionReadCommand> commands, long queryStartNanoTime)
             throws UnavailableException, ReadFailureException, ReadTimeoutException {
 
         List<TagUnfilteredPartitionIteratorPair> localTags = new ArrayList<>();
@@ -2031,6 +2032,7 @@ public class StorageProxy implements StorageProxyMBean
         assert localTags.size() == responseList.size();
 
         List<PartitionIterator> valuesToUse = new ArrayList<>();
+        List<IMutation> mutationList = new ArrayList<>();
         for (int i = 0; i < localTags.size(); i++) {
             TagUnfilteredPartitionIteratorPair localTag = localTags.get(0);
             TagResponsePair responsePair = responseList.get(0);
@@ -2038,10 +2040,56 @@ public class StorageProxy implements StorageProxyMBean
 
             if (consensusList.get(i)) {
                 if (localTag.getTimestamp().getTime() < responsePair.getTimestamp().getTime()) {
-                    // TODO: set local tag to new value
-
                     ReadResponse response = responsePair.getResponse();
                     valuesToUse.add(UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec()));
+
+                    PartitionIterator pi = UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec());
+                    while(pi.hasNext()) {
+                        // first we have to parse the value and tag from the result
+                        // tagValueResult.next() returns a RowIterator
+                        RowIterator ri = pi.next();
+                        ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
+                        ColumnMetadata valMetadata = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.VAL));
+
+                        assert tagMetaData != null && valMetadata != null;
+
+                        while (ri.hasNext()) {
+                            Row r = ri.next();
+
+                            LogicalTimestamp tag = LogicalTimestamp.deserialize(r.getCell(tagMetaData).value());
+
+                            String value = "";
+                            try {
+                                value = ByteBufferUtil.string(r.getCell(valMetadata).value());
+                            } catch (CharacterCodingException e) {
+                                logger.error("Unable to decode value");
+                            }
+
+                            TableMetadata tableMetadata = ri.metadata();
+
+                            Mutation.SimpleBuilder mutationBuilder = Mutation.simpleBuilder(tableMetadata.keyspace, ri.partitionKey());
+
+                            mutationBuilder.update(tableMetadata)
+                                    .timestamp(FBUtilities.timestampMicros()).row()
+                                    .add(LogicalTimestampColumns.TAG, LogicalTimestamp.serialize(tag))
+                                    .add(LogicalTimestampColumns.VAL, value);
+
+                            Mutation tvMutation = mutationBuilder.build();
+
+                            if (MutationVerbHandler.canUpdate(tvMutation)){
+                                Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
+                                Collection<InetAddressAndPort> endpoints = getLiveSortedEndpoints(keyspace ,tvMutation.key().getKey());
+                                WriteResponseHandler<?> handler = new WriteResponseHandler<>(endpoints,
+                                        Collections.emptyList(),
+                                        ConsistencyLevel.ONE,
+                                        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME),
+                                        null,
+                                        WriteType.BATCH_LOG,
+                                        queryStartNanoTime);
+                                performLocally(Stage.MUTATION, Optional.of(tvMutation), tvMutation::apply, handler);
+                            }
+                        }
+                    }
                 }
                 else {
                     UnfilteredPartitionIterator local = localTag.getPartitionIterator();
