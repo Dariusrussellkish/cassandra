@@ -25,6 +25,8 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.service.reads.DigestResolver.TagResponsePair;
+
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -68,6 +70,7 @@ public abstract class AbstractReadExecutor
     protected final ColumnFamilyStore cfs;
     protected final long queryStartNanoTime;
     protected volatile ReadResponse result = null;
+    protected volatile List<TagResponsePair> allResults = null;
 
     AbstractReadExecutor(Keyspace keyspace, ColumnFamilyStore cfs, ReadCommand command, ConsistencyLevel consistency, List<InetAddressAndPort> targetReplicas, long queryStartNanoTime)
     {
@@ -378,6 +381,12 @@ public abstract class AbstractReadExecutor
         this.result = result;
     }
 
+    public void setAllResults(List<TagResponsePair> results)
+    {
+        Preconditions.checkState(this.allResults == null, "Results can only be set once");
+        this.allResults = results;
+    }
+
     /**
      * Wait for the CL to be satisfied by responses
      */
@@ -408,6 +417,40 @@ public abstract class AbstractReadExecutor
         {
             Tracing.trace("Digest mismatch: Mismatch for key {}", getKey());
 //            readRepair.startRepair(digestResolver, handler.endpoints, getContactedReplicas(), this::setResult);
+        }
+    }
+
+    public void awaitResponsesTagResponsePairList() throws ReadTimeoutException
+    {
+        try
+        {
+            // the awaitResults function is exactly the same as the original
+            handler.awaitResults();
+        }
+        catch (ReadTimeoutException e)
+        {
+            try
+            {
+                onReadTimeout();
+            }
+            finally
+            {
+                throw e;
+            }
+        }
+        List<TagResponsePair> responses = digestResolver.getResponses();
+
+        if(responses != null)
+        {
+            setAllResults(responses);
+        }
+        else
+        {
+            // maxResponse is null, which is possible
+            // when the key we're trying to fetch doesn't
+            // even exist, use the default data result from
+            // digestResolver, which will be empty in this case
+            setResult(digestResolver.getReadResponse());
         }
     }
 
@@ -442,7 +485,7 @@ public abstract class AbstractReadExecutor
         }
         else
         {
-            // maxResponse is null, which is possible
+            // BSRResponse is null, which is possible
             // when the key we're trying to fetch doesn't
             // even exist, use the default data result from
             // digestResolver, which will be empty in this case
@@ -479,5 +522,11 @@ public abstract class AbstractReadExecutor
     {
         Preconditions.checkState(result != null, "Result must be set first");
         return result;
+    }
+
+    public List<TagResponsePair> getAllResults() throws ReadFailureException, ReadTimeoutException
+    {
+        Preconditions.checkState(allResults != null, "Results must be set first");
+        return allResults;
     }
 }

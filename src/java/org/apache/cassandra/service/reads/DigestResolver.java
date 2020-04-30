@@ -18,9 +18,11 @@
 package org.apache.cassandra.service.reads;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.Collections;
+import java.util.List;
 
 import com.google.common.base.Preconditions;
 
@@ -96,7 +98,7 @@ public class DigestResolver extends ResponseResolver
         return true;
     }
 
-    private class TagResponsePair implements Comparable<TagResponsePair>
+    public static class TagResponsePair implements Comparable<TagResponsePair>
     {
         private LogicalTimestamp tag;
         private ReadResponse response;
@@ -112,7 +114,7 @@ public class DigestResolver extends ResponseResolver
             return this.tag.compareTo(other.tag);
         }
 
-        public LogicalTimestamp getTag() {
+        public LogicalTimestamp getTimestamp() {
             return this.tag;
         }
 
@@ -121,11 +123,57 @@ public class DigestResolver extends ResponseResolver
         }
     }
 
+    public List<TagResponsePair> getResponses()
+    {
+        // check all data responses,
+        List<TagResponsePair> tagResponsePairList = new ArrayList<>();
+
+        ColumnIdentifier zIdentifier = new ColumnIdentifier(LogicalTimestampColumns.TAG, true);
+        for (MessageIn<ReadResponse> message : responses)
+        {
+            ReadResponse curResponse = message.payload;
+
+            // check if the response is indeed a data response
+            // we shouldn't get a digest response here
+            assert !curResponse.isDigestResponse();
+
+            // get the partition iterator corresponding to the
+            // current data response
+            PartitionIterator pi = UnfilteredPartitionIterators.filter(curResponse.makeIterator(command), command.nowInSec());
+            // get the z value column
+            while(pi.hasNext())
+            {
+                // zValueReadResult.next() returns a RowIterator
+                RowIterator ri = pi.next();
+                while(ri.hasNext())
+                {
+                    ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
+                    Row r = ri.next();
+
+                    // todo: the entire row is read for the sake of development
+                    // future improvement could be made
+
+                    LogicalTimestamp curTag = new LogicalTimestamp();
+                    Cell tagCell = r.getCell(tagMetaData);
+                    LogicalTimestamp readingTag = LogicalTimestamp.deserialize(tagCell.value());
+                    if(tagCell!=null && readingTag!=null){
+                        curTag = readingTag;
+                    }
+
+                    // add tag to max heap
+                    tagResponsePairList.add(new TagResponsePair(curTag, curResponse));
+                }
+            }
+        }
+
+        // remove max value
+        return tagResponsePairList;
+    }
+
     public ReadResponse getBSRResponse()
     {
         // check all data responses,
         // extract the one with max z value
-        LogicalTimestamp maxTag = new LogicalTimestamp();
         ReadResponse maxResponse = null;
 
         // TODO: find a way to get this from the replication factor
@@ -140,7 +188,7 @@ public class DigestResolver extends ResponseResolver
 
             // check if the response is indeed a data response
             // we shouldn't get a digest response here
-            assert curResponse.isDigestResponse() == false;
+            assert !curResponse.isDigestResponse();
 
             // get the partition iterator corresponding to the
             // current data response

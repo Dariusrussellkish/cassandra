@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
 public class LogicalTimestamp implements Serializable, Comparable<LogicalTimestamp>
 {
     private int logicalTIme;
-    private String writerId ;
+    private final String writerId ;
     private static final Logger logger = LoggerFactory.getLogger(StorageProxy.class);
 
     public LogicalTimestamp(){

@@ -19,7 +19,6 @@ package org.apache.cassandra.service;
 
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
@@ -38,6 +37,8 @@ import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.cassandra.db.filter.*;
 import org.apache.commons.lang3.StringUtils;
+
+import org.apache.cassandra.service.reads.DigestResolver.TagResponsePair;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1883,7 +1884,7 @@ public class StorageProxy implements StorageProxyMBean
         SinglePartitionReadCommand incomingRead = commands.iterator().next();
         ColumnMetadata tagMetadata = incomingRead.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
         if(tagMetadata != null)
-            return fetchRowsAbd(commands);
+            return fetchRowsBSR(commands);
 
         int cmdCount = commands.size();
 
@@ -1929,8 +1930,52 @@ public class StorageProxy implements StorageProxyMBean
         return PartitionIterators.concat(results);
     }
 
-    private static PartitionIterator fetchRowsAbd(List<SinglePartitionReadCommand> commands)
+    private static class TagUnfilteredPartitionIteratorPair {
+        private LogicalTimestamp timestamp;
+        private UnfilteredPartitionIterator partitionIterator;
+
+        public TagUnfilteredPartitionIteratorPair(LogicalTimestamp timestamp, UnfilteredPartitionIterator partitionIterator)
+        {
+            this.timestamp = timestamp;
+            this.partitionIterator = partitionIterator;
+        }
+
+        public UnfilteredPartitionIterator getPartitionIterator() {
+            return partitionIterator;
+        }
+
+        public LogicalTimestamp getTimestamp(){
+            return timestamp;
+        }
+    }
+
+    private static PartitionIterator fetchRowsBSR(List<SinglePartitionReadCommand> commands)
             throws UnavailableException, ReadFailureException, ReadTimeoutException {
+
+        List<TagUnfilteredPartitionIteratorPair> localTags = new ArrayList<>();
+        for (SinglePartitionReadCommand command : commands) {
+            LogicalTimestamp tagLocal = new LogicalTimestamp();
+            try (ReadExecutionController executionController = command.executionController();
+                 UnfilteredPartitionIterator iterator = command.executeLocally(executionController)) {
+                // first we have to transform it into a PartitionIterator
+                PartitionIterator pi = UnfilteredPartitionIterators.filter(iterator, command.nowInSec());
+                while (pi.hasNext()) {
+                    RowIterator ri = pi.next();
+                    while (ri.hasNext()) {
+                        Row r = ri.next();
+                        ColumnMetadata colMeta = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
+                        Cell c = r.getCell(colMeta);
+                        if (c == null) {
+                            logger.error(r.toString());
+                        } else {
+                            tagLocal = LogicalTimestamp.deserialize(c.value());
+                        }
+                    }
+                }
+                localTags.add(new TagUnfilteredPartitionIteratorPair(tagLocal, iterator));
+            }
+        }
+
         // first we have to create a full partition read based on the
         // incoming read command to cover both value and z_value column
         List<SinglePartitionReadCommand> tagValueReadList = new ArrayList<>(commands.size());
@@ -1948,56 +1993,78 @@ public class StorageProxy implements StorageProxyMBean
         // execute the tag value read, the result will be the
         // tag value pair with the largest tag
 
-        ReadResponse tagValueResult = fetchTagValueBSR(tagValueReadList.get(0), System.nanoTime());
-        List<ReadResponse> tagValueResultList = new ArrayList<>();
+        List<TagResponsePair> tagValueResult = fetchTagValueWitnesses(tagValueReadList.get(0), System.nanoTime());
+        List<List<TagResponsePair>> tagValueResultList = new ArrayList<>();
         tagValueResultList.add(tagValueResult);
-        PartitionIterator pi = prepIterator(commands, tagValueResultList);
 
-        List<IMutation> mutationList = new ArrayList<>();
-        // write the tag value pair with the largest tag to all servers
-        while(pi.hasNext())
+        List<Boolean> consensusList = new ArrayList<>(commands.size());
+        Collections.fill(consensusList, Boolean.FALSE);
+        List<TagResponsePair> responseList = new ArrayList<>(commands.size());
+        for (int i = 0; i < tagValueReadList.size(); i++)
         {
-            // first we have to parse the value and tag from the result
-            // tagValueResult.next() returns a RowIterator
-            RowIterator ri = pi.next();
-            ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
-            ColumnMetadata valMetadata = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.VAL));
-
-            assert tagMetaData != null && valMetadata != null;
-
-            while(ri.hasNext())
+            List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
+            TagResponsePair result = null;
+            Map<Integer, List<TagResponsePair>> witnesses = new ConcurrentHashMap<>();
+            for (TagResponsePair tagResponse : tagResponseList)
             {
-                Row r = ri.next();
-
-                LogicalTimestamp tag = LogicalTimestamp.deserialize(r.getCell(tagMetaData).value());
-
-                String value = "";
-                try{
-                    value = ByteBufferUtil.string(r.getCell(valMetadata).value());
-                } catch (CharacterCodingException e){
-                    logger.error("Unable to decode value");
+                int logicalTimeStamp = tagResponse.getTimestamp().getTime();
+                if (witnesses.containsKey(logicalTimeStamp))
+                {
+                    List<TagResponsePair> tsList = witnesses.get(logicalTimeStamp);
+                    tsList.add(tagResponse);
+                    if (tsList.size() > ConsistencyLevel.ByzantineFaultTolerance)
+                    {
+                        result = tsList.get(0);
+                        consensusList.set(i, Boolean.TRUE);
+                        break;
+                    }
+                } else {
+                    List<TagResponsePair> v = new ArrayList<>();
+                    v.add(tagResponse);
+                    witnesses.put(logicalTimeStamp, v);
                 }
-
-                TableMetadata tableMetadata = ri.metadata();
-
-                Mutation.SimpleBuilder mutationBuilder = Mutation.simpleBuilder(tableMetadata.keyspace, ri.partitionKey());
-
-                mutationBuilder.update(tableMetadata)
-                        .timestamp(FBUtilities.timestampMicros()).row()
-                        .add(LogicalTimestampColumns.TAG, LogicalTimestamp.serialize(tag))
-                        .add(LogicalTimestampColumns.VAL, value);
-
-                Mutation tvMutation = mutationBuilder.build();
-
-                mutationList.add(tvMutation);
             }
-
-
-            // then we will have to perform the mutation we've just generated
-            mutateDoWrite(mutationList, ConsistencyLevel.QUORUM, System.nanoTime());
+            responseList.set(i, result);
         }
 
-        return prepIterator(commands, tagValueResultList);
+        // ensure a write has already been done for every read request
+        assert localTags.size() == responseList.size();
+
+        List<PartitionIterator> valuesToUse = new ArrayList<>();
+        for (int i = 0; i < localTags.size(); i++) {
+            TagUnfilteredPartitionIteratorPair localTag = localTags.get(0);
+            TagResponsePair responsePair = responseList.get(0);
+            SinglePartitionReadCommand command = commands.get(i);
+
+            if (consensusList.get(i)) {
+                if (localTag.getTimestamp().getTime() < responsePair.getTimestamp().getTime()) {
+                    // TODO: set local tag to new value
+
+                    ReadResponse response = responsePair.getResponse();
+                    valuesToUse.add(UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec()));
+                }
+                else {
+                    UnfilteredPartitionIterator local = localTag.getPartitionIterator();
+                    valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
+                }
+            } else {
+                UnfilteredPartitionIterator local = localTag.getPartitionIterator();
+                valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
+            }
+        }
+
+        return PartitionIterators.concat(valuesToUse);
+    }
+
+    private static List<TagResponsePair> fetchTagValueWitnesses(SinglePartitionReadCommand command, long queryStartNanoTime)
+            throws UnavailableException, ReadFailureException, ReadTimeoutException
+    {
+        AbstractReadExecutor read = AbstractReadExecutor.getReadExecutor(command, ConsistencyLevel.BSR, queryStartNanoTime);
+        read.executeAsyncBSR();
+        read.maybeTryAdditionalReplicas();
+        // gets the f+1 highest value from responses
+        read.awaitResponses();
+        return read.getAllResults();
     }
 
     // gets the f+1 highest value
