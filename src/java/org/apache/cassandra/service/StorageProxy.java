@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.service;
 
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -695,25 +696,32 @@ public class StorageProxy implements StorageProxyMBean
 
         // BSR get
         // create an read command to fetch the z value corresponding to the key
-        // TODO: extend to allow multiple mutations
-        IMutation mut = (IMutation) mutations.toArray()[0];
-        TableMetadata tableMetadata = mut.getPartitionUpdates().iterator().next().metadata();
-        int nowInSec = FBUtilities.nowInSeconds();
-        DecoratedKey decoratedKey = mut.key();
+        List<SinglePartitionReadCommand> tagReads = new ArrayList<>();
+        for (IMutation mutation : mutations)
+        {
+            TableMetadata tableMetadata = mutation.getPartitionUpdates().iterator().next().metadata();
+            int nowInSec = FBUtilities.nowInSeconds();
+            DecoratedKey decoratedKey = mutation.key();
 
-        SinglePartitionReadCommand tagRead = SinglePartitionReadCommand.fullPartitionRead(
-                tableMetadata,
-                nowInSec,
-                decoratedKey
-        );
+            tagReads.add(SinglePartitionReadCommand.fullPartitionRead(
+                    tableMetadata,
+                    nowInSec,
+                    decoratedKey
+            ));
+        }
+        SinglePartitionReadCommand tagRead = tagReads.get(0);
 
-        HashMap<String, LogicalTimestamp> maxTsMap = new HashMap<>();
+        HashMap<String, LogicalTimestamp> BSRTimeStampMap = new HashMap<>();
         // TODO: extend to allow multiple mutations
+        // fetchTagValueBSR will get the (f+1)th highest tag
         ReadResponse read = fetchTagValueBSR(tagRead, System.nanoTime());
+
         List<ReadResponse> readList = new ArrayList<>();
         List<SinglePartitionReadCommand> commandList = new ArrayList<>();
-        readList.add(read);
-        commandList.add(tagRead);
+        readList.add(read); // TODO: refactor to allow multiple mutations
+        commandList.add(tagRead); // TODO: refactor to allow multiple mutations
+
+        // code reuse, must take List inputs
         PartitionIterator zValueReadResult = prepIterator(commandList, readList);
 
         while(zValueReadResult.hasNext())
@@ -725,8 +733,8 @@ public class StorageProxy implements StorageProxyMBean
             {
                 Cell c = ri.next().getCell(colMeta);
                 if (c != null) {
-                    LogicalTimestamp maxTag = LogicalTimestamp.deserialize(c.value());
-                    maxTsMap.put(ri.partitionKey().toString(), maxTag);
+                    LogicalTimestamp BSRTimeStamp = LogicalTimestamp.deserialize(c.value());
+                    BSRTimeStampMap.put(ri.partitionKey().toString(), BSRTimeStamp);
                 }
             }
         }
@@ -743,10 +751,10 @@ public class StorageProxy implements StorageProxyMBean
         {
             Mutation.SimpleBuilder mutationBuilder = Mutation.simpleBuilder(mutation.getKeyspaceName(), mutation.key());
 
-            tableMetadata = mutation.getPartitionUpdates().iterator().next().metadata();
+            TableMetadata tableMetadata = mutation.getPartitionUpdates().iterator().next().metadata();
             long timeStamp = FBUtilities.timestampMicros();
-            boolean containsKey = maxTsMap.containsKey(mutation.key().toString());
-            LogicalTimestamp curTag =  containsKey ? maxTsMap.get(mutation.key().toString()) : new LogicalTimestamp();
+            boolean containsKey = BSRTimeStampMap.containsKey(mutation.key().toString());
+            LogicalTimestamp curTag =  containsKey ? BSRTimeStampMap.get(mutation.key().toString()) : new LogicalTimestamp();
 
             mutationBuilder.update(tableMetadata)
                     .timestamp(timeStamp)
@@ -764,6 +772,7 @@ public class StorageProxy implements StorageProxyMBean
             newMutations.add(newMutation);
         }
 
+        // wait for n-f responses
         mutateDoWrite(newMutations, ConsistencyLevel.BSR, System.nanoTime());
     }
 
@@ -1885,7 +1894,14 @@ public class StorageProxy implements StorageProxyMBean
         SinglePartitionReadCommand incomingRead = commands.iterator().next();
         ColumnMetadata tagMetadata = incomingRead.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
         if(tagMetadata != null)
-            return fetchRowsBSR(commands, queryStartNanoTime);
+             try {
+                 return fetchRowsBSR(commands, queryStartNanoTime);
+             }
+            // TODO: Figure out how to better handle this
+            catch (IOException e) {
+                 logger.error("Corrupted System or Read before Write");
+                 throw new UnavailableException(ConsistencyLevel.BSR, 0, 0);
+            }
 
         int cmdCount = commands.size();
 
@@ -1951,12 +1967,14 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     private static PartitionIterator fetchRowsBSR(List<SinglePartitionReadCommand> commands, long queryStartNanoTime)
-            throws UnavailableException, ReadFailureException, ReadTimeoutException {
+            throws UnavailableException, ReadFailureException, ReadTimeoutException, IOException {
 
+        // local reads, get the LogicalTimeStamp and corresponding UnfilteredPartitionIterator
         List<TagUnfilteredPartitionIteratorPair> localTags = new ArrayList<>();
         for (SinglePartitionReadCommand command : commands) {
-            LogicalTimestamp tagLocal = new LogicalTimestamp();
+            LogicalTimestamp tagLocal = null;
             try (ReadExecutionController executionController = command.executionController();
+                 // Here is where the local execution occurs
                  UnfilteredPartitionIterator iterator = command.executeLocally(executionController)) {
                 // first we have to transform it into a PartitionIterator
                 PartitionIterator pi = UnfilteredPartitionIterators.filter(iterator, command.nowInSec());
@@ -1998,8 +2016,11 @@ public class StorageProxy implements StorageProxyMBean
         List<List<TagResponsePair>> tagValueResultList = new ArrayList<>();
         tagValueResultList.add(tagValueResult);
 
+        // TODO: possibly refactor consensusList out
+        // used to mark if this read had consensus
         List<Boolean> consensusList = new ArrayList<>(commands.size());
         Collections.fill(consensusList, Boolean.FALSE);
+        // tag response pairs of a consensus, null if no consensus
         List<TagResponsePair> responseList = new ArrayList<>(commands.size());
         for (int i = 0; i < tagValueReadList.size(); i++)
         {
@@ -2011,8 +2032,11 @@ public class StorageProxy implements StorageProxyMBean
                 int logicalTimeStamp = tagResponse.getTimestamp().getTime();
                 if (witnesses.containsKey(logicalTimeStamp))
                 {
+                    // add to consensus list for key
                     List<TagResponsePair> tsList = witnesses.get(logicalTimeStamp);
                     tsList.add(tagResponse);
+
+                    // if a consensus of witnesses has been reached
                     if (tsList.size() > ConsistencyLevel.ByzantineFaultTolerance)
                     {
                         result = tsList.get(0);
@@ -2020,6 +2044,7 @@ public class StorageProxy implements StorageProxyMBean
                         break;
                     }
                 } else {
+                    // timestamp value not seen, create new one
                     List<TagResponsePair> v = new ArrayList<>();
                     v.add(tagResponse);
                     witnesses.put(logicalTimeStamp, v);
@@ -2032,17 +2057,22 @@ public class StorageProxy implements StorageProxyMBean
         assert localTags.size() == responseList.size();
 
         List<PartitionIterator> valuesToUse = new ArrayList<>();
-        List<IMutation> mutationList = new ArrayList<>();
         for (int i = 0; i < localTags.size(); i++) {
+            // get local and remote reads
             TagUnfilteredPartitionIteratorPair localTag = localTags.get(0);
             TagResponsePair responsePair = responseList.get(0);
             SinglePartitionReadCommand command = commands.get(i);
 
+            // see if this read has a consensus
             if (consensusList.get(i)) {
+                // if the local tag is behind the remote consensus
                 if (localTag.getTimestamp().getTime() < responsePair.getTimestamp().getTime()) {
                     ReadResponse response = responsePair.getResponse();
+                    // use the remote consensus in the read return
                     valuesToUse.add(UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec()));
 
+                    // do the local mutation
+                    // create the mutation
                     PartitionIterator pi = UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec());
                     while(pi.hasNext()) {
                         // first we have to parse the value and tag from the result
@@ -2076,18 +2106,19 @@ public class StorageProxy implements StorageProxyMBean
 
                             Mutation tvMutation = mutationBuilder.build();
 
-                            if (MutationVerbHandler.canUpdate(tvMutation)){
-                                Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
-                                Collection<InetAddressAndPort> endpoints = getLiveSortedEndpoints(keyspace ,tvMutation.key().getKey());
-                                WriteResponseHandler<?> handler = new WriteResponseHandler<>(endpoints,
-                                        Collections.emptyList(),
-                                        ConsistencyLevel.ONE,
-                                        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME),
-                                        null,
-                                        WriteType.BATCH_LOG,
-                                        queryStartNanoTime);
-                                performLocally(Stage.MUTATION, Optional.of(tvMutation), tvMutation::apply, handler);
-                            }
+                            // get keyspace and endpoints? needed to make the WriteResponseHandler
+                            Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
+                            Collection<InetAddressAndPort> endpoints = getLiveSortedEndpoints(keyspace ,tvMutation.key().getKey());
+                            // TODO: use query start time or new time?
+                            WriteResponseHandler<?> handler = new WriteResponseHandler<>(endpoints,
+                                    Collections.emptyList(),
+                                    ConsistencyLevel.ONE,
+                                    Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME),
+                                    null,
+                                    WriteType.BATCH_LOG,
+                                    System.nanoTime()
+                            );
+                            performLocally(Stage.MUTATION, Optional.of(tvMutation), tvMutation::apply, handler);
                         }
                     }
                 }
@@ -2096,6 +2127,13 @@ public class StorageProxy implements StorageProxyMBean
                     valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
                 }
             } else {
+                // no consensus from external servers
+                // but also no available local value
+                // this shouldn't happen?
+                if (localTag.getTimestamp() == null)
+                {
+                    throw new IOException("Read before a write or corrupted quorum");
+                }
                 UnfilteredPartitionIterator local = localTag.getPartitionIterator();
                 valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
             }
