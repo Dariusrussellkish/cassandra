@@ -179,7 +179,6 @@ public class DigestResolver extends ResponseResolver
         // Store results in a maxheap so we can get the (f+1)th highest tag
         int replicationFactor = 20;
         PriorityBlockingQueue<TagResponsePair> sortedTags = new PriorityBlockingQueue<>(replicationFactor, Collections.reverseOrder());
-
         for (MessageIn<ReadResponse> message : responses)
         {
             ReadResponse curResponse = message.payload;
@@ -215,14 +214,14 @@ public class DigestResolver extends ResponseResolver
                     }
                     logger.debug("adding response {} to maxHeap", curTag.getTime());
                     // add tag to max heap
-                    sortedTags.add(new TagResponsePair(curTag, curResponse));
+                    sortedTags.put(new TagResponsePair(curTag, curResponse));
                 }
             }
         }
 
         // remove max values for f+1 iterations
-        assert sortedTags.size() >= ConsistencyLevel.ByzantineFaultTolerance + 1 :
-                String.format("Heap is not large enough with only: %d elements", sortedTags.size());
+//        assert sortedTags.size() >= ConsistencyLevel.ByzantineFaultTolerance + 1 :
+//                String.format("Heap is not large enough with only: %d elements", sortedTags.size());
         for (int i = 0; i < ConsistencyLevel.ByzantineFaultTolerance + 1; i++) {
             TagResponsePair nthMax = sortedTags.poll();
             if (nthMax != null)
