@@ -187,6 +187,9 @@ public class DigestResolver extends ResponseResolver
 
             // check if the response is indeed a data response
             // we shouldn't get a digest response here
+            if (curResponse.isDigestResponse()) {
+                logger.warn("Illegal DigestResponse when requesting a Data Response");
+            }
             assert !curResponse.isDigestResponse() : "Expected Data Response, received Digest Response";
 
             // get the partition iterator corresponding to the
@@ -211,7 +214,7 @@ public class DigestResolver extends ResponseResolver
                     if(tagCell!=null && readingTag!=null){
                         curTag = readingTag;
                     }
-
+                    logger.info("adding response {} to maxHeap", curTag.getTime());
                     // add tag to max heap
                     sortedTags.add(new TagResponsePair(curTag, curResponse));
                 }
@@ -226,8 +229,8 @@ public class DigestResolver extends ResponseResolver
                maxResponse = nthMax.getResponse();
             }
         }
-
-        assert maxResponse != null;
+        assert maxResponse != null : "Max response was unexpectedly null";
+        logger.info("Maximum Response: {}", maxResponse.toString());
         return maxResponse;
     }
 
