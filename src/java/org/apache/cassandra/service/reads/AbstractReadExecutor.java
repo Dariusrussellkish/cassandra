@@ -383,7 +383,7 @@ public abstract class AbstractReadExecutor
 
     public void setAllResults(List<TagResponsePair> results)
     {
-        Preconditions.checkState(this.allResults == null, "Results can only be set once");
+        Preconditions.checkState(this.allResults == null, "All results can only be set once");
         this.allResults = results;
     }
 

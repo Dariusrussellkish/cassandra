@@ -2054,7 +2054,7 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         // ensure a write has already been done for every read request
-        assert localTags.size() == responseList.size();
+        assert localTags.size() == responseList.size() : "We did not get a local tag hit for every remote response";
 
         List<PartitionIterator> valuesToUse = new ArrayList<>();
         for (int i = 0; i < localTags.size(); i++) {
@@ -2081,7 +2081,7 @@ public class StorageProxy implements StorageProxyMBean
                         ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
                         ColumnMetadata valMetadata = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.VAL));
 
-                        assert tagMetaData != null && valMetadata != null;
+                        assert tagMetaData != null && valMetadata != null : "This read has no LogicalTimestamp";
 
                         while (ri.hasNext()) {
                             Row r = ri.next();

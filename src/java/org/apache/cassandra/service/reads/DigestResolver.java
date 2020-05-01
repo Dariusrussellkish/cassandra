@@ -135,7 +135,7 @@ public class DigestResolver extends ResponseResolver
 
             // check if the response is indeed a data response
             // we shouldn't get a digest response here
-            assert !curResponse.isDigestResponse();
+            assert !curResponse.isDigestResponse() : "Expected Data Response, received Digest Response";
 
             // get the partition iterator corresponding to the
             // current data response
@@ -187,7 +187,7 @@ public class DigestResolver extends ResponseResolver
 
             // check if the response is indeed a data response
             // we shouldn't get a digest response here
-            assert !curResponse.isDigestResponse();
+            assert !curResponse.isDigestResponse() : "Expected Data Response, received Digest Response";
 
             // get the partition iterator corresponding to the
             // current data response
