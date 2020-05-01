@@ -100,8 +100,8 @@ public class DigestResolver extends ResponseResolver
 
     public static class TagResponsePair implements Comparable<TagResponsePair>
     {
-        private LogicalTimestamp tag;
-        private ReadResponse response;
+        private final LogicalTimestamp tag;
+        private final ReadResponse response;
 
         public TagResponsePair(LogicalTimestamp tag, ReadResponse response)
         {
@@ -128,7 +128,6 @@ public class DigestResolver extends ResponseResolver
         // check all data responses,
         List<TagResponsePair> tagResponsePairList = new ArrayList<>();
 
-        ColumnIdentifier zIdentifier = new ColumnIdentifier(LogicalTimestampColumns.TAG, true);
         for (MessageIn<ReadResponse> message : responses)
         {
             ReadResponse curResponse = message.payload;
@@ -214,7 +213,7 @@ public class DigestResolver extends ResponseResolver
                     if(tagCell!=null && readingTag!=null){
                         curTag = readingTag;
                     }
-                    logger.info("adding response {} to maxHeap", curTag.getTime());
+                    logger.debug("adding response {} to maxHeap", curTag.getTime());
                     // add tag to max heap
                     sortedTags.add(new TagResponsePair(curTag, curResponse));
                 }
@@ -222,6 +221,8 @@ public class DigestResolver extends ResponseResolver
         }
 
         // remove max values for f+1 iterations
+        assert sortedTags.size() >= ConsistencyLevel.ByzantineFaultTolerance + 1 :
+                String.format("Heap is not large enough with only: %d elements", sortedTags.size());
         for (int i = 0; i < ConsistencyLevel.ByzantineFaultTolerance + 1; i++) {
             TagResponsePair nthMax = sortedTags.poll();
             if (nthMax != null)
@@ -229,8 +230,7 @@ public class DigestResolver extends ResponseResolver
                maxResponse = nthMax.getResponse();
             }
         }
-        assert maxResponse != null : "Max response was unexpectedly null";
-        logger.info("Maximum Response: {}", maxResponse.toString());
+
         return maxResponse;
     }
 
