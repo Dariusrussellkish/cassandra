@@ -2149,7 +2149,7 @@ public class StorageProxy implements StorageProxyMBean
         read.executeAsyncBSR();
         read.maybeTryAdditionalReplicas();
         // gets the f+1 highest value from responses
-        read.awaitResponses();
+        read.awaitResponsesTagResponsePairList();
         return read.getAllResults();
     }
 

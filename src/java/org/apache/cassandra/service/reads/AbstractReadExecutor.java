@@ -526,7 +526,7 @@ public abstract class AbstractReadExecutor
 
     public List<TagResponsePair> getAllResults() throws ReadFailureException, ReadTimeoutException
     {
-        Preconditions.checkState(allResults != null, "Results must be set first");
+        Preconditions.checkState(allResults != null, "All results must be set first");
         return allResults;
     }
 }
