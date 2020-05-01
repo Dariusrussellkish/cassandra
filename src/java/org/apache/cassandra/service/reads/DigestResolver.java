@@ -181,7 +181,6 @@ public class DigestResolver extends ResponseResolver
         int replicationFactor = 20;
         PriorityBlockingQueue<TagResponsePair> sortedTags = new PriorityBlockingQueue<>(replicationFactor, Collections.reverseOrder());
 
-        ColumnIdentifier zIdentifier = new ColumnIdentifier(LogicalTimestampColumns.TAG, true);
         for (MessageIn<ReadResponse> message : responses)
         {
             ReadResponse curResponse = message.payload;
@@ -228,6 +227,7 @@ public class DigestResolver extends ResponseResolver
             }
         }
 
+        assert maxResponse != null;
         return maxResponse;
     }
 
