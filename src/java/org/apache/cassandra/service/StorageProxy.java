@@ -1719,6 +1719,7 @@ public class StorageProxy implements StorageProxyMBean {
             throws UnavailableException, ReadFailureException, ReadTimeoutException, IOException {
 
         // local reads, get the LogicalTimeStamp and corresponding UnfilteredPartitionIterator
+        assert commands.size() > 0 : "No commands?";
         List<TagUnfilteredPartitionIteratorPair> localTags = new ArrayList<>();
         for (SinglePartitionReadCommand command : commands) {
             LogicalTimestamp tagLocal = null;
@@ -1762,6 +1763,8 @@ public class StorageProxy implements StorageProxyMBean {
         // execute the tag value read, the result will be the
         // tag value pair with the largest tag
 
+        assert tagValueReadList.size() > 0 : "TagValueReadList is empty";
+
         List<TagResponsePair> tagValueResult = fetchTagValueWitnesses(tagValueReadList.get(0), System.nanoTime());
         List<List<TagResponsePair>> tagValueResultList = new ArrayList<>();
         tagValueResultList.add(tagValueResult);
@@ -1801,7 +1804,7 @@ public class StorageProxy implements StorageProxyMBean {
 
         // ensure a write has already been done for every read request
         assert localTags.size() == responseList.size() : "We did not get a local tag hit for every remote response";
-        logger.info("Found {} local tags, expected: {}", localTags.size(), responseList.size());
+        logger.warn("Found {} local tags, expected: {}", localTags.size(), responseList.size());
 
         List<PartitionIterator> valuesToUse = new ArrayList<>();
         for (int i = 0; i < localTags.size(); i++) {
