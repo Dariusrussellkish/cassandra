@@ -1804,13 +1804,12 @@ public class StorageProxy implements StorageProxyMBean {
 
         // ensure a write has already been done for every read request
         assert localTags.size() == responseList.size() : "We did not get a local tag hit for every remote response";
-        logger.warn("Found {} local tags, expected: {}", localTags.size(), responseList.size());
 
         List<PartitionIterator> valuesToUse = new ArrayList<>();
         for (int i = 0; i < localTags.size(); i++) {
             // get local and remote reads
-            TagUnfilteredPartitionIteratorPair localTag = localTags.get(0);
-            TagResponsePair responsePair = responseList.get(0);
+            TagUnfilteredPartitionIteratorPair localTag = localTags.get(i);
+            TagResponsePair responsePair = responseList.get(i);
             SinglePartitionReadCommand command = commands.get(i);
 
             // see if this read has a consensus
@@ -1855,20 +1854,20 @@ public class StorageProxy implements StorageProxyMBean {
                                     .add(LogicalTimestampColumns.VAL, value);
 
                             Mutation tvMutation = mutationBuilder.build();
-
+                            tvMutation.applyFuture();
                             // get keyspace and endpoints? needed to make the WriteResponseHandler
-                            Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
-                            Collection<InetAddressAndPort> endpoints = getLiveSortedEndpoints(keyspace, tvMutation.key().getKey());
-                            // TODO: use query start time or new time?
-                            WriteResponseHandler<?> handler = new WriteResponseHandler<>(endpoints,
-                                    Collections.emptyList(),
-                                    ConsistencyLevel.ONE,
-                                    Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME),
-                                    null,
-                                    WriteType.BATCH_LOG,
-                                    System.nanoTime()
-                            );
-                            performLocally(Stage.MUTATION, Optional.of(tvMutation), tvMutation::apply, handler);
+//                            Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
+//                            Collection<InetAddressAndPort> endpoints = getLiveSortedEndpoints(keyspace, tvMutation.key().getKey());
+//                            // TODO: use query start time or new time?
+//                            WriteResponseHandler<?> handler = new WriteResponseHandler<>(endpoints,
+//                                    Collections.emptyList(),
+//                                    ConsistencyLevel.ONE,
+//                                    Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME),
+//                                    null,
+//                                    WriteType.BATCH_LOG,
+//                                    System.nanoTime()
+//                            );
+//                            performLocally(Stage.MUTATION, Optional.of(tvMutation), tvMutation::apply, handler);
                         }
                     }
                 } else {
@@ -1887,6 +1886,7 @@ public class StorageProxy implements StorageProxyMBean {
             }
         }
 
+        assert valuesToUse.size() > 0 : "We found no values?";
         return PartitionIterators.concat(valuesToUse);
     }
 
