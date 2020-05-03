@@ -20,7 +20,6 @@ package org.apache.cassandra.service;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
@@ -37,6 +36,8 @@ import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.LocalKVMemory.LocalReadMemory;
+import org.apache.cassandra.LocalKVMemory.TagReadPair;
 import org.apache.cassandra.db.filter.*;
 import org.apache.commons.lang3.StringUtils;
 
@@ -51,7 +52,6 @@ import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.service.reads.AbstractReadExecutor;
 import org.apache.cassandra.service.reads.DataResolver;
@@ -1651,14 +1651,7 @@ public class StorageProxy implements StorageProxyMBean {
         SinglePartitionReadCommand incomingRead = commands.iterator().next();
         ColumnMetadata tagMetadata = incomingRead.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
         if (tagMetadata != null)
-            try {
-                return fetchRowsBSR(commands, queryStartNanoTime);
-            }
-            // TODO: Figure out how to better handle this
-            catch (IOException e) {
-                logger.error("Corrupted System or Read before Write");
-                throw new UnavailableException(ConsistencyLevel.BSR, 0, 0);
-            }
+            return fetchRowsBSR(commands, queryStartNanoTime);
 
         int cmdCount = commands.size();
 
@@ -1697,53 +1690,19 @@ public class StorageProxy implements StorageProxyMBean {
         return PartitionIterators.concat(results);
     }
 
-    private static class TagUnfilteredPartitionIteratorPair {
-        private final LogicalTimestamp timestamp;
-        private final UnfilteredPartitionIterator partitionIterator;
-
-        public TagUnfilteredPartitionIteratorPair(LogicalTimestamp timestamp, UnfilteredPartitionIterator partitionIterator) {
-            this.timestamp = timestamp;
-            this.partitionIterator = partitionIterator;
-        }
-
-        public UnfilteredPartitionIterator getPartitionIterator() {
-            return partitionIterator;
-        }
-
-        public LogicalTimestamp getTimestamp() {
-            return timestamp;
-        }
-    }
-
     private static PartitionIterator fetchRowsBSR(List<SinglePartitionReadCommand> commands, long queryStartNanoTime)
-            throws UnavailableException, ReadFailureException, ReadTimeoutException, IOException {
+            throws UnavailableException, ReadFailureException, ReadTimeoutException {
+
 
         // local reads, get the LogicalTimeStamp and corresponding UnfilteredPartitionIterator
         assert commands.size() > 0 : "No commands?";
-        List<TagUnfilteredPartitionIteratorPair> localTags = new ArrayList<>();
+
+        List<TagReadPair> localTags = new ArrayList<>();
+        LocalReadMemory localMemory = LocalReadMemory.getInstance();
+        // fetch from local memory or null if non-existent
         for (SinglePartitionReadCommand command : commands) {
-            LogicalTimestamp tagLocal = null;
-            try (ReadExecutionController executionController = command.executionController();
-                // Here is where the local execution occurs
-                UnfilteredPartitionIterator iterator = command.executeLocally(executionController)) {
-                // first we have to transform it into a PartitionIterator
-                PartitionIterator pi = UnfilteredPartitionIterators.filter(iterator, command.nowInSec());
-                while (pi.hasNext()) {
-                    RowIterator ri = pi.next();
-                    while (ri.hasNext()) {
-                        Row r = ri.next();
-                        ColumnMetadata colMeta = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
-                        Cell c = r.getCell(colMeta);
-                        if (c == null) {
-                            logger.error(r.toString());
-                        } else {
-                            tagLocal = LogicalTimestamp.deserialize(c.value());
-                        }
-                    }
-                }
-                assert tagLocal != null : "Local tag was not found";
-                localTags.add(new TagUnfilteredPartitionIteratorPair(tagLocal, iterator));
-            }
+            String key = command.partitionKey().toString();
+            localTags.add(localMemory.get(key));
             assert localTags.size() >= 1 : "No commands or no local tag?";
         }
 
@@ -1770,33 +1729,27 @@ public class StorageProxy implements StorageProxyMBean {
         tagValueResultList.add(tagValueResult);
 
         // TODO: possibly refactor consensusList out
-        // used to mark if this read had consensus
+        // used to mark if this read had witness quorum
         List<Boolean> consensusList = new ArrayList<>(commands.size());
         Collections.fill(consensusList, Boolean.FALSE);
-        // tag response pairs of a consensus, null if no consensus
+
+        // tag response pairs of a witness quorum, null if no quorum
         List<TagResponsePair> responseList = new ArrayList<>(commands.size());
         for (int i = 0; i < tagValueResultList.size(); i++) {
             List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
             TagResponsePair result = null;
-            Map<Integer, List<TagResponsePair>> witnesses = new ConcurrentHashMap<>();
+            Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
             for (TagResponsePair tagResponse : tagResponseList) {
                 int logicalTimeStamp = tagResponse.getTimestamp().getTime();
-                if (witnesses.containsKey(logicalTimeStamp)) {
-                    // add to consensus list for key
-                    List<TagResponsePair> tsList = witnesses.get(logicalTimeStamp);
-                    tsList.add(tagResponse);
+                // add to quorum size for key
+                int numWitnesses = witnesses.getOrDefault(logicalTimeStamp, 0) + 1;
+                witnesses.put(logicalTimeStamp, numWitnesses);
 
-                    // if a consensus of witnesses has been reached
-                    if (tsList.size() > ConsistencyLevel.ByzantineFaultTolerance) {
-                        result = tsList.get(0);
-                        consensusList.set(i, Boolean.TRUE);
-                        break;
-                    }
-                } else {
-                    // timestamp value not seen, create new one
-                    List<TagResponsePair> v = new ArrayList<>();
-                    v.add(tagResponse);
-                    witnesses.put(logicalTimeStamp, v);
+                // if a quorum of witnesses has been reached
+                if (numWitnesses > ConsistencyLevel.ByzantineFaultTolerance) {
+                    result = tagResponse;
+                    consensusList.set(i, Boolean.TRUE);
+                    break;
                 }
             }
             responseList.set(i, result);
@@ -1808,84 +1761,35 @@ public class StorageProxy implements StorageProxyMBean {
         List<PartitionIterator> valuesToUse = new ArrayList<>();
         for (int i = 0; i < localTags.size(); i++) {
             // get local and remote reads
-            TagUnfilteredPartitionIteratorPair localTag = localTags.get(i);
+            TagReadPair localTag = localTags.get(i);
             TagResponsePair responsePair = responseList.get(i);
             SinglePartitionReadCommand command = commands.get(i);
 
-            // see if this read has a consensus
+            // see if this read has a quorum
             if (consensusList.get(i)) {
-                // if the local tag is behind the remote consensus
-                if (localTag.getTimestamp().getTime() < responsePair.getTimestamp().getTime()) {
-                    ReadResponse response = responsePair.getResponse();
-                    // use the remote consensus in the read return
-                    valuesToUse.add(UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec()));
-
-                    // do the local mutation
-                    // create the mutation
-                    PartitionIterator pi = UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec());
-                    while (pi.hasNext()) {
-                        // first we have to parse the value and tag from the result
-                        // tagValueResult.next() returns a RowIterator
-                        RowIterator ri = pi.next();
-                        ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
-                        ColumnMetadata valMetadata = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.VAL));
-
-                        assert tagMetaData != null && valMetadata != null : "This read has no LogicalTimestamp";
-
-                        while (ri.hasNext()) {
-                            Row r = ri.next();
-
-                            LogicalTimestamp tag = LogicalTimestamp.deserialize(r.getCell(tagMetaData).value());
-
-                            String value = "";
-                            try {
-                                value = ByteBufferUtil.string(r.getCell(valMetadata).value());
-                            } catch (CharacterCodingException e) {
-                                logger.error("Unable to decode value");
-                            }
-
-                            TableMetadata tableMetadata = ri.metadata();
-
-                            Mutation.SimpleBuilder mutationBuilder = Mutation.simpleBuilder(tableMetadata.keyspace, ri.partitionKey());
-
-                            mutationBuilder.update(tableMetadata)
-                                    .timestamp(FBUtilities.timestampMicros()).row()
-                                    .add(LogicalTimestampColumns.TAG, LogicalTimestamp.serialize(tag))
-                                    .add(LogicalTimestampColumns.VAL, value);
-
-                            Mutation tvMutation = mutationBuilder.build();
-                            tvMutation.applyFuture();
-                            // get keyspace and endpoints? needed to make the WriteResponseHandler
-//                            Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
-//                            Collection<InetAddressAndPort> endpoints = getLiveSortedEndpoints(keyspace, tvMutation.key().getKey());
-//                            // TODO: use query start time or new time?
-//                            WriteResponseHandler<?> handler = new WriteResponseHandler<>(endpoints,
-//                                    Collections.emptyList(),
-//                                    ConsistencyLevel.ONE,
-//                                    Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME),
-//                                    null,
-//                                    WriteType.BATCH_LOG,
-//                                    System.nanoTime()
-//                            );
-//                            performLocally(Stage.MUTATION, Optional.of(tvMutation), tvMutation::apply, handler);
-                        }
-                    }
+                // if the local tag is behind the remote by quorum
+                if (localTag.getTag().getTime() < responsePair.getTimestamp().getTime()) {
+                    // use the remote quorum in the read return
+                    UnfilteredPartitionIterator value = responsePair.getResponse().makeIterator(command);
+                    valuesToUse.add(UnfilteredPartitionIterators.filter(value, command.nowInSec()));
+                    // update local memory
+                    localMemory.put(command.partitionKey().toString(), responsePair.getTimestamp(), value);
                 } else {
-                    UnfilteredPartitionIterator local = localTag.getPartitionIterator();
+                    UnfilteredPartitionIterator local = localTag.getValue();
                     valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
                 }
             } else {
-                // no consensus from external servers
+                // no quorum from external servers
                 // but also no available local value
                 // this shouldn't happen?
-                if (localTag.getTimestamp() == null) {
-                    throw new IOException("Read before a write or corrupted quorum");
+                if (localTag != null) {
+                    UnfilteredPartitionIterator local = localTag.getValue();
+                    valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
+                } else{
+                    valuesToUse.add(UnfilteredPartitionIterators.filter(null, command.nowInSec()));
                 }
-                UnfilteredPartitionIterator local = localTag.getPartitionIterator();
-                valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
             }
         }
-
         assert valuesToUse.size() > 0 : "We found no values?";
         return PartitionIterators.concat(valuesToUse);
     }

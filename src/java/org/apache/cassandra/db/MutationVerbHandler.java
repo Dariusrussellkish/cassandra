@@ -20,8 +20,13 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.util.Iterator;
 
+import org.apache.cassandra.LocalKVMemory.LocalReadMemory;
+import org.apache.cassandra.LocalKVMemory.LocalWriteMemory;
+import org.apache.cassandra.LocalKVMemory.TagReadPair;
+import org.apache.cassandra.LocalKVMemory.TagWritePair;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.SingletonUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.Cell;
@@ -69,7 +74,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         }
 
         // comparing the tag and the one in mutation, act accordingly
-        if (canUpdate(message.payload)) {
+        if (canUpdateViaLocalMemory(message.payload)) {
             try {
                 message.payload.applyFuture().thenAccept(o -> reply(id, replyTo));
             } catch (WriteTimeoutException wto) {
@@ -77,6 +82,39 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
             }
         } else {
             reply(id,replyTo);
+        }
+    }
+
+    public static boolean canUpdateViaLocalMemory(IMutation mutation) {
+        LocalWriteMemory localMemory = LocalWriteMemory.getInstance();
+        String key = mutation.key().toString();
+
+        // get the LogicalTimeStamp of the mutation
+        LogicalTimestamp tagRemote = new LogicalTimestamp();
+        Row data = mutation.getPartitionUpdates().iterator().next().getRow(Clustering.EMPTY);
+        ColumnIdentifier ci = new ColumnIdentifier(LogicalTimestampColumns.TAG,true);
+
+        for (Cell c : data.cells()) {
+            if(c.column().name.equals(ci)) {
+                tagRemote = LogicalTimestamp.deserialize(c.value());
+                break;
+            }
+        }
+
+        TagWritePair kv = localMemory.get(key);
+
+        if (kv != null) {
+            if (kv.getTag().compareTo(tagRemote) < 0) {
+                localMemory.put(key, tagRemote, mutation);
+                return true;
+            } else {
+                return false;
+            }
+        }
+        else {
+            // we don't currently maintain this key
+            localMemory.put(key, tagRemote, mutation);
+            return true;
         }
     }
 
