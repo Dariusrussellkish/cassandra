@@ -1757,7 +1757,6 @@ public class StorageProxy implements StorageProxyMBean {
                 // add to quorum size for key
                 int numWitnesses = witnesses.getOrDefault(logicalTimeStamp, 0) + 1;
                 witnesses.put(logicalTimeStamp, numWitnesses);
-                assert false : "fetched witness";
                 // if a quorum of witnesses has been reached
                 if (numWitnesses > ConsistencyLevel.ByzantineFaultTolerance) {
                     result = tagResponse;
