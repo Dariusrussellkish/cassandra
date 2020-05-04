@@ -1810,7 +1810,7 @@ public class StorageProxy implements StorageProxyMBean {
         // gets the f+1 highest value from responses
         read.awaitResponsesTagResponsePairList();
 
-        assert false : String.format("made TagValue Pair List: %d", read.getAllResults().size());
+//        assert false : String.format("made TagValue Pair List: %d", read.getAllResults().size());
 
         return read.getAllResults();
     }
