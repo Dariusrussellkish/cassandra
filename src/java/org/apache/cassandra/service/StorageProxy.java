@@ -1771,8 +1771,6 @@ public class StorageProxy implements StorageProxyMBean {
         // ensure a write has already been done for every read request
         assert localTags.size() == responseList.size() : "We did not get a local tag hit for every remote response";
 
-        assert false : "Got to local update";
-
         List<PartitionIterator> valuesToUse = new ArrayList<>();
         for (int i = 0; i < localTags.size(); i++) {
             // get local and remote reads
