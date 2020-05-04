@@ -1759,11 +1759,12 @@ public class StorageProxy implements StorageProxyMBean {
                 witnesses.put(logicalTimeStamp, numWitnesses);
                 // if a quorum of witnesses has been reached
                 if (numWitnesses > ConsistencyLevel.ByzantineFaultTolerance) {
+                    assert false : "a " + i + " " + tagResponseList.size() + " " + commands.size() + " " + consensusList.size();
                     result = tagResponse;
                     consensusList.set(i, Boolean.TRUE);
-                    assert false : "tagResponse List size is " + tagResponseList.size();
                     break;
                 }
+                assert false : i + " " + tagResponseList.size() + " " + commands.size() + " " + consensusList.size();
             }
             assert false : "Looped through responses at least once: " + result;
             responseList.set(i, result);
