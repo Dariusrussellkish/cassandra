@@ -1744,7 +1744,6 @@ public class StorageProxy implements StorageProxyMBean {
 
             if (tagResponseList == null || tagResponseList.size() == 0) {
                 assert false : "tagResponse List is " + tagResponseList + "breaking loop";
-                responseList.set(i, null);
                 continue;
             }
 
@@ -1766,7 +1765,7 @@ public class StorageProxy implements StorageProxyMBean {
                     break;
                 }
             }
-            responseList.set(i, result);
+            responseList.add(result);
         }
 
         // ensure a write has already been done for every read request
