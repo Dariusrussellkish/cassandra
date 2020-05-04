@@ -1721,6 +1721,8 @@ public class StorageProxy implements StorageProxyMBean {
         // execute the tag value read, the result will be the
         // tag value pair with the largest tag
 
+        assert false : "Before fetching values";
+
         assert tagValueReadList.size() > 0 : "TagValueReadList is empty";
         List<List<TagResponsePair>> tagValueResultList = new ArrayList<>();
         for (SinglePartitionReadCommand readCommand : tagValueReadList) {
@@ -1732,6 +1734,8 @@ public class StorageProxy implements StorageProxyMBean {
         // used to mark if this read had witness quorum
         List<Boolean> consensusList = new ArrayList<>(commands.size());
         Collections.fill(consensusList, Boolean.FALSE);
+
+        assert false : "Before calculating witnesses";
 
         // tag response pairs of a witness quorum, null if no quorum
         List<TagResponsePair> responseList = new ArrayList<>(commands.size());
@@ -1807,6 +1811,9 @@ public class StorageProxy implements StorageProxyMBean {
         read.maybeTryAdditionalReplicas();
         // gets the f+1 highest value from responses
         read.awaitResponsesTagResponsePairList();
+
+        assert false : String.format("made TagValue Pair List: %d", read.getAllResults().size());
+
         return read.getAllResults();
     }
 
