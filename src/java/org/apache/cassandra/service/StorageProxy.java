@@ -1694,7 +1694,6 @@ public class StorageProxy implements StorageProxyMBean {
     private static PartitionIterator fetchRowsBSR(List<SinglePartitionReadCommand> commands, long queryStartNanoTime)
             throws UnavailableException, ReadFailureException, ReadTimeoutException {
 
-        assert false : "reached fetchRowsBSR";
         // local reads, get the LogicalTimeStamp and corresponding UnfilteredPartitionIterator
         assert commands.size() > 0 : "Test commands?";
 
@@ -1704,7 +1703,6 @@ public class StorageProxy implements StorageProxyMBean {
         for (SinglePartitionReadCommand command : commands) {
             String key = command.partitionKey().toString();
             localTags.add(localMemory.get(key));
-            assert localTags.size() >= 1 : "No commands or no local tag?";
         }
 
         // first we have to create a full partition read based on the
@@ -1724,10 +1722,11 @@ public class StorageProxy implements StorageProxyMBean {
         // tag value pair with the largest tag
 
         assert tagValueReadList.size() > 0 : "TagValueReadList is empty";
-
-        List<TagResponsePair> tagValueResult = fetchTagValueWitnesses(tagValueReadList.get(0), System.nanoTime());
         List<List<TagResponsePair>> tagValueResultList = new ArrayList<>();
-        tagValueResultList.add(tagValueResult);
+        for (SinglePartitionReadCommand readCommand : tagValueReadList) {
+            List<TagResponsePair> tagValueResult = fetchTagValueWitnesses(readCommand, System.nanoTime());
+            tagValueResultList.add(tagValueResult);
+        }
 
         // TODO: possibly refactor consensusList out
         // used to mark if this read had witness quorum
@@ -1740,6 +1739,10 @@ public class StorageProxy implements StorageProxyMBean {
             List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
             TagResponsePair result = null;
             Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
+            if (tagResponseList.size() == 0) {
+                responseList.set(i, null);
+                break;
+            }
             for (TagResponsePair tagResponse : tagResponseList) {
                 int logicalTimeStamp = tagResponse.getTimestamp().getTime();
                 // add to quorum size for key
@@ -1758,6 +1761,8 @@ public class StorageProxy implements StorageProxyMBean {
 
         // ensure a write has already been done for every read request
         assert localTags.size() == responseList.size() : "We did not get a local tag hit for every remote response";
+
+        assert false : "Get to local update";
 
         List<PartitionIterator> valuesToUse = new ArrayList<>();
         for (int i = 0; i < localTags.size(); i++) {
