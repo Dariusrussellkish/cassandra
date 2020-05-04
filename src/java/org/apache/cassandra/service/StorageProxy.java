@@ -1695,12 +1695,13 @@ public class StorageProxy implements StorageProxyMBean {
             throws UnavailableException, ReadFailureException, ReadTimeoutException {
 
         // local reads, get the LogicalTimeStamp and corresponding UnfilteredPartitionIterator
-        List<TagReadPair> localTags = new ArrayList<>();
+        TagReadPair[] localTags = new TagReadPair[commands.size()];
         LocalReadMemory localMemory = LocalReadMemory.getInstance();
         // fetch from local memory or null if non-existent
-        for (SinglePartitionReadCommand command : commands) {
+        for (int i = 0; i < localTags.length; i++) {
+            SinglePartitionReadCommand command = commands.get(i);
             String key = command.partitionKey().toString();
-            localTags.add(localMemory.get(key));
+            localTags[i] = localMemory.get(key);
         }
 
         // first we have to create a full partition read based on the
@@ -1732,7 +1733,7 @@ public class StorageProxy implements StorageProxyMBean {
         }
 
         // tag response pairs of a witness quorum, null if no quorum
-        List<TagResponsePair> responseList = new ArrayList<>(commands.size());
+        TagResponsePair[] responseList = new TagResponsePair[commands.size()];
         for (int i = 0; i < tagValueResultList.size(); i++) {
             List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
 
@@ -1757,17 +1758,17 @@ public class StorageProxy implements StorageProxyMBean {
                     break;
                 }
             }
-            responseList.add(result);
+            responseList[i] = result;
         }
 
         // ensure a write has already been done for every read request
-        assert localTags.size() == responseList.size() : "We did not get a local tag hit for every remote response " + localTags.size() + " " + responseList.size();
+        assert localTags.length == responseList.length : "We did not get a local tag hit for every remote response " + localTags.length + " " + responseList.length;
 
         List<PartitionIterator> valuesToUse = new ArrayList<>();
-        for (int i = 0; i < localTags.size(); i++) {
+        for (int i = 0; i < localTags.length; i++) {
             // get local and remote reads
-            TagReadPair localTag = localTags.get(i);
-            TagResponsePair responsePair = responseList.get(i);
+            TagReadPair localTag = localTags[i];
+            TagResponsePair responsePair = responseList[i];
             SinglePartitionReadCommand command = commands.get(i);
 
             // see if this read has a quorum
