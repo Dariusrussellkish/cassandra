@@ -1781,15 +1781,21 @@ public class StorageProxy implements StorageProxyMBean {
             // see if this read has a quorum
             if (consensusList.get(i)) {
                 // if the local tag is behind the remote by quorum
-                if (localTag.getTag().getTime() < responsePair.getTimestamp().getTime()) {
-                    // use the remote quorum in the read return
+                if (localTag != null) {
+                    if (localTag.getTag().getTime() < responsePair.getTimestamp().getTime()) {
+                        // use the remote quorum in the read return
+                        UnfilteredPartitionIterator value = responsePair.getResponse().makeIterator(command);
+                        valuesToUse.add(UnfilteredPartitionIterators.filter(value, command.nowInSec()));
+                        // update local memory
+                        localMemory.put(command.partitionKey().toString(), responsePair.getTimestamp(), value);
+                    } else {
+                        UnfilteredPartitionIterator local = localTag.getValue();
+                        valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
+                    }
+                } else {
                     UnfilteredPartitionIterator value = responsePair.getResponse().makeIterator(command);
                     valuesToUse.add(UnfilteredPartitionIterators.filter(value, command.nowInSec()));
-                    // update local memory
                     localMemory.put(command.partitionKey().toString(), responsePair.getTimestamp(), value);
-                } else {
-                    UnfilteredPartitionIterator local = localTag.getValue();
-                    valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
                 }
             } else {
                 // no quorum from external servers
@@ -1805,11 +1811,10 @@ public class StorageProxy implements StorageProxyMBean {
                     // gets the f+1 highest value from responses
                     read.awaitResponses();
                     valuesToUse.add(UnfilteredPartitionIterators.filter(read.getResult().makeIterator(command), command.nowInSec()));
-
                 }
             }
         }
-        assert valuesToUse.size() > 0 : "We found no values?";
+        assert false : "end of bsr read";
         return PartitionIterators.concat(valuesToUse);
     }
 
