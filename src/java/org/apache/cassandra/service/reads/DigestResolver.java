@@ -165,7 +165,6 @@ public class DigestResolver extends ResponseResolver
             }
         }
 
-        // remove max value
         return tagResponsePairList;
     }
 

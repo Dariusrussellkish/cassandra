@@ -1721,8 +1721,6 @@ public class StorageProxy implements StorageProxyMBean {
         // execute the tag value read, the result will be the
         // tag value pair with the largest tag
 
-        assert false : "Before fetching values";
-
         assert tagValueReadList.size() > 0 : "TagValueReadList is empty";
         List<List<TagResponsePair>> tagValueResultList = new ArrayList<>();
         for (SinglePartitionReadCommand readCommand : tagValueReadList) {
