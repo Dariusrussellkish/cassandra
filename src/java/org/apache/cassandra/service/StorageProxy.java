@@ -1814,7 +1814,6 @@ public class StorageProxy implements StorageProxyMBean {
                 }
             }
         }
-        assert false : "end of bsr read";
         return PartitionIterators.concat(valuesToUse);
     }
 
