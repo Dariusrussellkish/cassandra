@@ -1749,8 +1749,11 @@ public class StorageProxy implements StorageProxyMBean {
             TagResponsePair result = null;
             Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
             for (TagResponsePair tagResponse : tagResponseList) {
-                if (tagResponse == null)
+                if (tagResponse == null) {
+                    assert false : "tagResponse List size is " + tagResponseList.size() + " elem is null";
                     continue;
+                }
+                assert false : "tagResponse List size is " + tagResponseList.size() + "breaking loop";
                 int logicalTimeStamp = tagResponse.getTimestamp().getTime();
                 // add to quorum size for key
                 int numWitnesses = witnesses.getOrDefault(logicalTimeStamp, 0) + 1;
