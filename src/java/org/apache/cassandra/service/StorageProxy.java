@@ -1530,8 +1530,6 @@ public class StorageProxy implements StorageProxyMBean {
             throw new IsBootstrappingException();
         }
 
-        assert false : "reached read";
-
         return consistencyLevel.isSerialConsistency()
                 ? readWithPaxos(group, consistencyLevel, state, queryStartNanoTime)
                 : readRegular(group, consistencyLevel, queryStartNanoTime);
@@ -1696,7 +1694,7 @@ public class StorageProxy implements StorageProxyMBean {
     private static PartitionIterator fetchRowsBSR(List<SinglePartitionReadCommand> commands, long queryStartNanoTime)
             throws UnavailableException, ReadFailureException, ReadTimeoutException {
 
-
+        assert false : "reached fetchRowsBSR";
         // local reads, get the LogicalTimeStamp and corresponding UnfilteredPartitionIterator
         assert commands.size() > 0 : "Test commands?";
 
