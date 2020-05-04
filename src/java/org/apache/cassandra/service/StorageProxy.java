@@ -1753,16 +1753,16 @@ public class StorageProxy implements StorageProxyMBean {
                     assert false : "tagResponse List size is " + tagResponseList.size() + " elem is null";
                     continue;
                 }
-                assert false : "tagResponse List size is " + tagResponseList.size() + "breaking loop";
                 int logicalTimeStamp = tagResponse.getTimestamp().getTime();
                 // add to quorum size for key
                 int numWitnesses = witnesses.getOrDefault(logicalTimeStamp, 0) + 1;
                 witnesses.put(logicalTimeStamp, numWitnesses);
-
+                assert false : "fetched witness";
                 // if a quorum of witnesses has been reached
                 if (numWitnesses > ConsistencyLevel.ByzantineFaultTolerance) {
                     result = tagResponse;
                     consensusList.set(i, Boolean.TRUE);
+                    assert false : "tagResponse List size is " + tagResponseList.size();
                     break;
                 }
             }
