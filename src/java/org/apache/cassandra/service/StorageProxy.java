@@ -1733,7 +1733,7 @@ public class StorageProxy implements StorageProxyMBean {
         List<Boolean> consensusList = new ArrayList<>(commands.size());
         Collections.fill(consensusList, Boolean.FALSE);
 
-//        assert false : "Before calculating witnesses";
+        assert tagValueResultList.size() == commands.size() : tagValueResultList.size() + " " + commands.size();
 
         // tag response pairs of a witness quorum, null if no quorum
         List<TagResponsePair> responseList = new ArrayList<>(commands.size());
@@ -1745,8 +1745,6 @@ public class StorageProxy implements StorageProxyMBean {
                 responseList.set(i, null);
                 continue;
             }
-
-            assert false : (String.format("i: %d, responseList size: %d", i, tagResponseList.size()));
 
             TagResponsePair result = null;
             Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
