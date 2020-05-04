@@ -1743,7 +1743,6 @@ public class StorageProxy implements StorageProxyMBean {
             List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
 
             if (tagResponseList == null || tagResponseList.size() == 0) {
-                assert false : "tagResponse List is " + tagResponseList + "breaking loop";
                 continue;
             }
 
@@ -1751,7 +1750,6 @@ public class StorageProxy implements StorageProxyMBean {
             Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
             for (TagResponsePair tagResponse : tagResponseList) {
                 if (tagResponse == null) {
-                    assert false : "tagResponse List size is " + tagResponseList.size() + " elem is null";
                     continue;
                 }
                 int logicalTimeStamp = tagResponse.getTimestamp().getTime();
