@@ -1799,7 +1799,13 @@ public class StorageProxy implements StorageProxyMBean {
                     UnfilteredPartitionIterator local = localTag.getValue();
                     valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
                 } else{
-                    valuesToUse.add(UnfilteredPartitionIterators.filter(null, command.nowInSec()));
+                    AbstractReadExecutor read = AbstractReadExecutor.getReadExecutor(command, ConsistencyLevel.BSR, queryStartNanoTime);
+                    read.executeAsync();
+                    read.maybeTryAdditionalReplicas();
+                    // gets the f+1 highest value from responses
+                    read.awaitResponses();
+                    valuesToUse.add(UnfilteredPartitionIterators.filter(read.getResult().makeIterator(command), command.nowInSec()));
+
                 }
             }
         }
