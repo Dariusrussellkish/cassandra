@@ -1530,6 +1530,8 @@ public class StorageProxy implements StorageProxyMBean {
             throw new IsBootstrappingException();
         }
 
+        assert false : "reached read";
+
         return consistencyLevel.isSerialConsistency()
                 ? readWithPaxos(group, consistencyLevel, state, queryStartNanoTime)
                 : readRegular(group, consistencyLevel, queryStartNanoTime);
@@ -1648,6 +1650,7 @@ public class StorageProxy implements StorageProxyMBean {
         // if it doesn't, it means this is not an ABD read operation,
         // the original fetchRows will be used, this is a workaround
         // to the initialization failure issue
+
         SinglePartitionReadCommand incomingRead = commands.iterator().next();
         ColumnMetadata tagMetadata = incomingRead.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
         if (tagMetadata != null)
@@ -1695,7 +1698,7 @@ public class StorageProxy implements StorageProxyMBean {
 
 
         // local reads, get the LogicalTimeStamp and corresponding UnfilteredPartitionIterator
-        assert commands.size() > 0 : "No commands?";
+        assert commands.size() > 0 : "Test commands?";
 
         List<TagReadPair> localTags = new ArrayList<>();
         LocalReadMemory localMemory = LocalReadMemory.getInstance();
