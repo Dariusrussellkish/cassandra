@@ -1740,14 +1740,16 @@ public class StorageProxy implements StorageProxyMBean {
         for (int i = 0; i < tagValueResultList.size(); i++) {
             List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
 
-//            assert false : "tagResponseList " + tagResponseList.size();
+            if (tagResponseList == null || tagResponseList.size() == 0) {
+                System.err.println("tagResponse List is " + tagResponseList + "breaking loop");
+                responseList.set(i, null);
+                continue;
+            }
+
+            System.err.println(String.format("i: %d, responseList size: %d", i, tagResponseList.size()));
 
             TagResponsePair result = null;
             Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
-            if (tagResponseList.size() == 0) {
-                responseList.set(i, null);
-                break;
-            }
             for (TagResponsePair tagResponse : tagResponseList) {
                 if (tagResponse == null)
                     continue;
@@ -1763,14 +1765,14 @@ public class StorageProxy implements StorageProxyMBean {
                     break;
                 }
             }
-            assert false : "Looped through responses " + result;
+            assert false : "Looped through responses at least once: " + result;
             responseList.set(i, result);
         }
 
         // ensure a write has already been done for every read request
         assert localTags.size() == responseList.size() : "We did not get a local tag hit for every remote response";
 
-        assert false : "Get to local update";
+        assert false : "Got to local update";
 
         List<PartitionIterator> valuesToUse = new ArrayList<>();
         for (int i = 0; i < localTags.size(); i++) {
