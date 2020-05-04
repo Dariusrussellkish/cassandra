@@ -1733,12 +1733,15 @@ public class StorageProxy implements StorageProxyMBean {
         List<Boolean> consensusList = new ArrayList<>(commands.size());
         Collections.fill(consensusList, Boolean.FALSE);
 
-        assert false : "Before calculating witnesses";
+//        assert false : "Before calculating witnesses";
 
         // tag response pairs of a witness quorum, null if no quorum
         List<TagResponsePair> responseList = new ArrayList<>(commands.size());
         for (int i = 0; i < tagValueResultList.size(); i++) {
             List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
+
+            assert false : "tagResponseList " + tagResponseList.size();
+
             TagResponsePair result = null;
             Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
             if (tagResponseList.size() == 0) {
@@ -1746,6 +1749,8 @@ public class StorageProxy implements StorageProxyMBean {
                 break;
             }
             for (TagResponsePair tagResponse : tagResponseList) {
+                if (tagResponse == null)
+                    continue;
                 int logicalTimeStamp = tagResponse.getTimestamp().getTime();
                 // add to quorum size for key
                 int numWitnesses = witnesses.getOrDefault(logicalTimeStamp, 0) + 1;
@@ -1758,6 +1763,7 @@ public class StorageProxy implements StorageProxyMBean {
                     break;
                 }
             }
+            assert false : "Looped through responses " + result;
             responseList.set(i, result);
         }
 
