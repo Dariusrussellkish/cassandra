@@ -1740,7 +1740,7 @@ public class StorageProxy implements StorageProxyMBean {
         for (int i = 0; i < tagValueResultList.size(); i++) {
             List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
 
-            assert false : "tagResponseList " + tagResponseList.size();
+//            assert false : "tagResponseList " + tagResponseList.size();
 
             TagResponsePair result = null;
             Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
