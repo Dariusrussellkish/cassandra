@@ -1731,7 +1731,9 @@ public class StorageProxy implements StorageProxyMBean {
         // TODO: possibly refactor consensusList out
         // used to mark if this read had witness quorum
         List<Boolean> consensusList = new ArrayList<>(commands.size());
-        Collections.fill(consensusList, Boolean.FALSE);
+        for (int i = 0; i < commands.size(); i++) {
+            consensusList.add(Boolean.FALSE);
+        }
 
         assert tagValueResultList.size() == commands.size() : tagValueResultList.size() + " " + commands.size();
 
@@ -1764,7 +1766,6 @@ public class StorageProxy implements StorageProxyMBean {
                     consensusList.set(i, Boolean.TRUE);
                     break;
                 }
-                assert false : i + " " + tagResponseList.size() + " " + commands.size() + " " + consensusList.size();
             }
             assert false : "Looped through responses at least once: " + result;
             responseList.set(i, result);
