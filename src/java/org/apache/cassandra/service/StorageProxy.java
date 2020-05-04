@@ -1741,12 +1741,12 @@ public class StorageProxy implements StorageProxyMBean {
             List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
 
             if (tagResponseList == null || tagResponseList.size() == 0) {
-                System.err.println("tagResponse List is " + tagResponseList + "breaking loop");
+                assert false : "tagResponse List is " + tagResponseList + "breaking loop";
                 responseList.set(i, null);
                 continue;
             }
 
-            System.err.println(String.format("i: %d, responseList size: %d", i, tagResponseList.size()));
+            assert false : (String.format("i: %d, responseList size: %d", i, tagResponseList.size()));
 
             TagResponsePair result = null;
             Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
