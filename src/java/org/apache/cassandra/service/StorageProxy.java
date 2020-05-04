@@ -1695,8 +1695,6 @@ public class StorageProxy implements StorageProxyMBean {
             throws UnavailableException, ReadFailureException, ReadTimeoutException {
 
         // local reads, get the LogicalTimeStamp and corresponding UnfilteredPartitionIterator
-        assert commands.size() > 0 : "Test commands?";
-
         List<TagReadPair> localTags = new ArrayList<>();
         LocalReadMemory localMemory = LocalReadMemory.getInstance();
         // fetch from local memory or null if non-existent
@@ -1720,8 +1718,6 @@ public class StorageProxy implements StorageProxyMBean {
 
         // execute the tag value read, the result will be the
         // tag value pair with the largest tag
-
-        assert tagValueReadList.size() > 0 : "TagValueReadList is empty";
         List<List<TagResponsePair>> tagValueResultList = new ArrayList<>();
         for (SinglePartitionReadCommand readCommand : tagValueReadList) {
             List<TagResponsePair> tagValueResult = fetchTagValueWitnesses(readCommand, System.nanoTime());
@@ -1734,8 +1730,6 @@ public class StorageProxy implements StorageProxyMBean {
         for (int i = 0; i < commands.size(); i++) {
             consensusList.add(Boolean.FALSE);
         }
-
-        assert tagValueResultList.size() == commands.size() : tagValueResultList.size() + " " + commands.size();
 
         // tag response pairs of a witness quorum, null if no quorum
         List<TagResponsePair> responseList = new ArrayList<>(commands.size());
@@ -1767,7 +1761,7 @@ public class StorageProxy implements StorageProxyMBean {
         }
 
         // ensure a write has already been done for every read request
-        assert localTags.size() == responseList.size() : "We did not get a local tag hit for every remote response";
+        assert localTags.size() == responseList.size() : "We did not get a local tag hit for every remote response " + localTags.size() + " " + responseList.size();
 
         List<PartitionIterator> valuesToUse = new ArrayList<>();
         for (int i = 0; i < localTags.size(); i++) {
