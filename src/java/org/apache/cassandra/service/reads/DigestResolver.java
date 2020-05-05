@@ -26,7 +26,6 @@ import java.util.List;
 
 import com.google.common.base.Preconditions;
 
-import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
@@ -35,8 +34,8 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.service.LogicalTimestampColumns;
-import org.apache.cassandra.service.LogicalTimestamp;
+import org.apache.cassandra.LocalKVMemory.LogicalTimestampColumns;
+import org.apache.cassandra.LocalKVMemory.LogicalTimestamp;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
 import org.apache.cassandra.utils.ByteBufferUtil;
 

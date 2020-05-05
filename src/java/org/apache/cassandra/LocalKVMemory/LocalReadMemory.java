@@ -1,21 +1,33 @@
 package org.apache.cassandra.LocalKVMemory;
 
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.service.LogicalTimestamp;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Singleton Monotonic Local Memory Model for BSR.
+ * Utilizes thread-safe singleton paradigm to ensure only one instance of this class
+ * exists per Cassandra instance. Utilizes ConcurrentHashMap to allow for thread-safe access.
+ * Puts into the LocalReadMemory map are monotonic based on LogicalTimeStamp.
+ *
+ * @author Darius Russsell Kish
+ */
 public class LocalReadMemory {
     // private instance, so that it can be
     // accessed by only by getInstance() method
-    private static LocalReadMemory instance;
+    volatile private static LocalReadMemory instance;
     private final Map<String, TagReadPair> localMemory;
 
     private LocalReadMemory() {
         this.localMemory = new ConcurrentHashMap<>();
     }
 
+    /**
+     * Returns or instantiates the singleton class instance
+     *
+     * @return LocalReadMemory instance
+     */
     public static LocalReadMemory getInstance() {
         if (instance == null) {
             synchronized (LocalReadMemory.class) {
@@ -27,7 +39,15 @@ public class LocalReadMemory {
         return instance;
     }
 
-    public void put(String key, TagReadPair tv) {
+    /**
+     * Monotonic put into the LocalReadMemory map based on
+     * LogicalTimeStamp compareTo.
+     *
+     * @param key the Cassandra db associated key
+     * @param tv the TagReadPair to put into LocalReadMemory
+     * @see org.apache.cassandra.LocalKVMemory.LogicalTimestamp#compareTo(LogicalTimestamp)
+     */
+    synchronized public void put(String key, TagReadPair tv) {
         TagReadPair localtv = get(key);
         if (localtv != null) {
             if (localtv.compareTo(tv) < 0) {
@@ -40,7 +60,16 @@ public class LocalReadMemory {
         }
     }
 
-    public void put(String key, LogicalTimestamp ts, UnfilteredPartitionIterator v) {
+    /**
+     * Monotonic put into the LocalReadMemory map based on
+     * LogicalTimeStamp compareTo.
+     *
+     * @param key the Cassandra db associated key
+     * @param ts the LogicalTimestamp to use for the following read result
+     * @param v the UnfilteredPartitionIterator read result associated with the LogicalTimestamp
+     * @see org.apache.cassandra.LocalKVMemory.LogicalTimestamp#compareTo(LogicalTimestamp)
+     */
+    synchronized public void put(String key, LogicalTimestamp ts, UnfilteredPartitionIterator v) {
         TagReadPair localtv = get(key);
         if (localtv != null) {
             if (localtv.getTag().compareTo(ts) < 0) {
@@ -55,5 +84,28 @@ public class LocalReadMemory {
 
     public TagReadPair get(String key) {
         return localMemory.getOrDefault(key, null);
+    }
+
+    public static class TagReadPair implements Comparable<TagReadPair> {
+
+        private final LogicalTimestamp tag;
+        private final UnfilteredPartitionIterator value;
+
+        public TagReadPair(LogicalTimestamp tag, UnfilteredPartitionIterator value) {
+            this.tag = tag;
+            this.value = value;
+        }
+
+        public LogicalTimestamp getTag() {
+            return tag;
+        }
+
+        public UnfilteredPartitionIterator getValue() {
+            return value;
+        }
+
+        public int compareTo(TagReadPair other) {
+            return this.tag.compareTo(other.getTag());
+        }
     }
 }
