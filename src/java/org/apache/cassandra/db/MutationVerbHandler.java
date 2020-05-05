@@ -20,13 +20,9 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.util.Iterator;
 
-import org.apache.cassandra.LocalKVMemory.LocalReadMemory;
 import org.apache.cassandra.LocalKVMemory.LocalWriteMemory;
-import org.apache.cassandra.LocalKVMemory.TagReadPair;
-import org.apache.cassandra.LocalKVMemory.TagWritePair;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.partitions.SingletonUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.Cell;
@@ -36,8 +32,9 @@ import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.service.LogicalTimestampColumns;
-import org.apache.cassandra.service.LogicalTimestamp;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.LocalKVMemory.LogicalTimestampColumns;
+import org.apache.cassandra.LocalKVMemory.LogicalTimestamp;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -74,7 +71,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         }
 
         // comparing the tag and the one in mutation, act accordingly
-        if (canUpdateViaLocalMemory(message.payload)) {
+        if (canUpdate(message.payload)) {
             try {
                 message.payload.applyFuture().thenAccept(o -> reply(id, replyTo));
             } catch (WriteTimeoutException wto) {
@@ -85,6 +82,18 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         }
     }
 
+    /**
+     * Utilizes LocalWriteMemory to perform a local memory lookup and 
+     * determine if a the mutation will be accepted. Updates LocalWriteMemory
+     * if the mutation will be accepted.
+     * TODO: Currently not used
+     * 
+     * @author Darius Russell Kish
+     * @param mutation the mutation to check
+     * @return boolean canUpdate
+     * @see org.apache.cassandra.db.MutationVerbHandler#canUpdate(IMutation) 
+     * @see org.apache.cassandra.LocalKVMemory.LocalWriteMemory
+     */
     public static boolean canUpdateViaLocalMemory(IMutation mutation) {
         LocalWriteMemory localMemory = LocalWriteMemory.getInstance();
         String key = mutation.key().toString();
@@ -101,7 +110,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
             }
         }
 
-        TagWritePair kv = localMemory.get(key);
+        LocalWriteMemory.TagWritePair kv = localMemory.get(key);
 
         if (kv != null) {
             if (kv.getTag().compareTo(tagRemote) < 0) {
@@ -117,7 +126,15 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
             return true;
         }
     }
-
+    
+    /**
+     * Utilizes Cassandra DB engine to perform a local lookup and 
+     * determine if a the mutation will be accepted. 
+     *
+     * @param mutation the mutation to check
+     * @return boolean canUpdate
+     * @see org.apache.cassandra.db.SinglePartitionReadCommand#tagRead(TableMetadata, int, DecoratedKey) 
+     */
     public static boolean canUpdate(IMutation mutation){
         // first we have to create a read request out of the current mutation
         SinglePartitionReadCommand localRead = SinglePartitionReadCommand.tagRead(

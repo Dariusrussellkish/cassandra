@@ -1,4 +1,4 @@
-package org.apache.cassandra.service;
+package org.apache.cassandra.LocalKVMemory;
 
 public class LogicalTimestampColumns {
 

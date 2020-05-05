@@ -1,9 +1,10 @@
-package org.apache.cassandra.service;
+package org.apache.cassandra.LocalKVMemory;
 
 import java.nio.ByteBuffer;
 import java.io.Serializable;
 import java.nio.charset.CharacterCodingException;
 
+import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -50,13 +51,19 @@ public class LogicalTimestamp implements Serializable, Comparable<LogicalTimesta
         try {
             tagString = ByteBufferUtil.string(buf);
         } catch (CharacterCodingException e){
-            logger.warn("err casting tag {}", e);
+            logger.warn("err casting tag %s", e);
             return new LogicalTimestamp();
         }
 
         return new LogicalTimestamp(tagString);
     }
 
+    /**
+     * @deprecated
+     *
+     * @param other LogicalTimestamp to compare against
+     * @return boolean if LogicalTimestamp is larger
+     */
     public boolean isLarger(LogicalTimestamp other){
         if(this.logicalTIme != other.getTime()){
             return this.logicalTIme - other.getTime() > 0;
@@ -65,6 +72,11 @@ public class LogicalTimestamp implements Serializable, Comparable<LogicalTimesta
         }
     }
 
+    /**
+     *
+     * @param other LogicalTimestamp to compare against
+     * @return integer of LogicalTimestamp compare
+     */
     public int compareTo(LogicalTimestamp other)
     {
         if (this.logicalTIme != other.getTime()) {

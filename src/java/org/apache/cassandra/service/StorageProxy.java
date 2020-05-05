@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.service;
 
-import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
 import java.nio.file.Paths;
@@ -37,7 +36,8 @@ import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.cassandra.LocalKVMemory.LocalReadMemory;
-import org.apache.cassandra.LocalKVMemory.TagReadPair;
+import org.apache.cassandra.LocalKVMemory.LogicalTimestamp;
+import org.apache.cassandra.LocalKVMemory.LogicalTimestampColumns;
 import org.apache.cassandra.db.filter.*;
 import org.apache.commons.lang3.StringUtils;
 
@@ -605,9 +605,8 @@ public class StorageProxy implements StorageProxyMBean {
             throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException {
         Tracing.trace("Determining replicas for mutation");
 
-        long startTime = System.nanoTime();
 
-        // BSR get
+        // BSR get, corresponds to getTag in BSR paper
         // create an read command to fetch the z value corresponding to the key
         List<SinglePartitionReadCommand> tagReads = new ArrayList<>();
         for (IMutation mutation : mutations) {
@@ -621,21 +620,18 @@ public class StorageProxy implements StorageProxyMBean {
                     decoratedKey
             ));
         }
-        SinglePartitionReadCommand tagRead = tagReads.get(0);
 
-        HashMap<String, LogicalTimestamp> BSRTimeStampMap = new HashMap<>();
-        // TODO: extend to allow multiple mutations
         // fetchTagValueBSR will get the (f+1)th highest tag
-        ReadResponse read = fetchTagValueBSR(tagRead, System.nanoTime());
-
         List<ReadResponse> readList = new ArrayList<>();
-        List<SinglePartitionReadCommand> commandList = new ArrayList<>();
-        readList.add(read); // TODO: refactor to allow multiple mutations
-        commandList.add(tagRead); // TODO: refactor to allow multiple mutations
+        for (SinglePartitionReadCommand tagRead : tagReads) {
+            ReadResponse read = fetchTagValueBSR(tagRead, System.nanoTime());
+            readList.add(read);
+        }
 
-        // code reuse, must take List inputs
-        PartitionIterator zValueReadResult = prepIterator(commandList, readList);
+        PartitionIterator zValueReadResult = prepIterator(tagReads, readList);
 
+        // get the mutated key and use it as map key to reference LogicalTimeStamp associated with it
+        HashMap<String, LogicalTimestamp> BSRTimeStampMap = new HashMap<>();
         while (zValueReadResult.hasNext()) {
             RowIterator ri = zValueReadResult.next();
             ColumnMetadata colMeta = ri.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
@@ -1648,7 +1644,6 @@ public class StorageProxy implements StorageProxyMBean {
         // if it doesn't, it means this is not an ABD read operation,
         // the original fetchRows will be used, this is a workaround
         // to the initialization failure issue
-
         SinglePartitionReadCommand incomingRead = commands.iterator().next();
         ColumnMetadata tagMetadata = incomingRead.metadata().getColumn(ByteBufferUtil.bytes(LogicalTimestampColumns.TAG));
         if (tagMetadata != null)
@@ -1691,11 +1686,27 @@ public class StorageProxy implements StorageProxyMBean {
         return PartitionIterators.concat(results);
     }
 
+    /**
+     * When a tag-containing read is detected, this method will attempt to fetch
+     * the request reads from local memory, and check for a witness quorum from
+     * external nodes. It calculates the witness quorum and checks versioning
+     * against the local value. Updates local value if necessary.
+     *
+     * @author Darius Russell Kish
+     * @param commands list of read commands to execute
+     * @param queryStartNanoTime start time of the query for timing
+     * @return PartitionIterator read results
+     * @throws UnavailableException
+     * @throws ReadFailureException
+     * @throws ReadTimeoutException
+     * @see org.apache.cassandra.LocalKVMemory.LocalReadMemory
+     * @see org.apache.cassandra.service.StorageProxy#fetchRows(List, ConsistencyLevel, long)
+     */
     private static PartitionIterator fetchRowsBSR(List<SinglePartitionReadCommand> commands, long queryStartNanoTime)
             throws UnavailableException, ReadFailureException, ReadTimeoutException {
 
         // local reads, get the LogicalTimeStamp and corresponding UnfilteredPartitionIterator
-        TagReadPair[] localTags = new TagReadPair[commands.size()];
+        LocalReadMemory.TagReadPair[] localTags = new LocalReadMemory.TagReadPair[commands.size()];
         LocalReadMemory localMemory = LocalReadMemory.getInstance();
         // fetch from local memory or null if non-existent
         for (int i = 0; i < localTags.length; i++) {
@@ -1721,15 +1732,16 @@ public class StorageProxy implements StorageProxyMBean {
         // tag value pair with the largest tag
         List<List<TagResponsePair>> tagValueResultList = new ArrayList<>();
         for (SinglePartitionReadCommand readCommand : tagValueReadList) {
+            // These reads may arbitrarily contain local Cassandra DB values
             List<TagResponsePair> tagValueResult = fetchTagValueWitnesses(readCommand, System.nanoTime());
             tagValueResultList.add(tagValueResult);
         }
 
-        // TODO: possibly refactor consensusList out
+        // TODO: possibly refactor quorumList out
         // used to mark if this read had witness quorum
-        List<Boolean> consensusList = new ArrayList<>(commands.size());
+        List<Boolean> quorumList = new ArrayList<>(commands.size());
         for (int i = 0; i < commands.size(); i++) {
-            consensusList.add(Boolean.FALSE);
+            quorumList.add(Boolean.FALSE);
         }
 
         // tag response pairs of a witness quorum, null if no quorum
@@ -1737,11 +1749,13 @@ public class StorageProxy implements StorageProxyMBean {
         for (int i = 0; i < tagValueResultList.size(); i++) {
             List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
 
+            // Not sure if this will ever be hit, but better safe than sorry
             if (tagResponseList == null || tagResponseList.size() == 0) {
                 continue;
             }
 
-            TagResponsePair result = null;
+            // We use the first value as the default in case
+            TagResponsePair result = tagResponseList.get(0);
             Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
             for (TagResponsePair tagResponse : tagResponseList) {
                 if (tagResponse == null) {
@@ -1754,25 +1768,24 @@ public class StorageProxy implements StorageProxyMBean {
                 // if a quorum of witnesses has been reached
                 if (numWitnesses > ConsistencyLevel.ByzantineFaultTolerance) {
                     result = tagResponse;
-                    consensusList.set(i, Boolean.TRUE);
+                    quorumList.set(i, Boolean.TRUE);
                     break;
                 }
             }
+            // this defaults to the first response if no quorum is reached
+            // but quorumList will still have a false value for this entry
             responseList[i] = result;
         }
-
-        // ensure a write has already been done for every read request
-        assert localTags.length == responseList.length : "We did not get a local tag hit for every remote response " + localTags.length + " " + responseList.length;
 
         List<PartitionIterator> valuesToUse = new ArrayList<>();
         for (int i = 0; i < localTags.length; i++) {
             // get local and remote reads
-            TagReadPair localTag = localTags[i];
+            LocalReadMemory.TagReadPair localTag = localTags[i];
             TagResponsePair responsePair = responseList[i];
             SinglePartitionReadCommand command = commands.get(i);
 
             // see if this read has a quorum
-            if (consensusList.get(i)) {
+            if (quorumList.get(i)) {
                 // if the local tag is behind the remote by quorum
                 if (localTag != null) {
                     if (localTag.getTag().getTime() < responsePair.getTimestamp().getTime()) {
@@ -1782,28 +1795,28 @@ public class StorageProxy implements StorageProxyMBean {
                         // update local memory
                         localMemory.put(command.partitionKey().toString(), responsePair.getTimestamp(), value);
                     } else {
+                        // use local tag because it is further ahead than remote quorum
                         UnfilteredPartitionIterator local = localTag.getValue();
                         valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
                     }
                 } else {
+                    // must accept remote quorum because there is no local tag hit
+                    // set local tag to remote value
                     UnfilteredPartitionIterator value = responsePair.getResponse().makeIterator(command);
                     valuesToUse.add(UnfilteredPartitionIterators.filter(value, command.nowInSec()));
                     localMemory.put(command.partitionKey().toString(), responsePair.getTimestamp(), value);
                 }
             } else {
                 // no quorum from external servers
-                // but also no available local value
-                // this shouldn't happen?
                 if (localTag != null) {
                     UnfilteredPartitionIterator local = localTag.getValue();
                     valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
                 } else{
-                    AbstractReadExecutor read = AbstractReadExecutor.getReadExecutor(command, ConsistencyLevel.BSR, queryStartNanoTime);
-                    read.executeAsync();
-                    read.maybeTryAdditionalReplicas();
-                    // gets the f+1 highest value from responses
-                    read.awaitResponses();
-                    valuesToUse.add(UnfilteredPartitionIterators.filter(read.getResult().makeIterator(command), command.nowInSec()));
+                    // if there is no consensus and no hit in local memory
+                    // we use the first response from remote, which will be an empty PartitionIterator
+                    UnfilteredPartitionIterator response = responsePair.getResponse().makeIterator(command);
+                    PartitionIterator responsePI = UnfilteredPartitionIterators.filter(response, command.nowInSec());
+                    valuesToUse.add(responsePI);
                 }
             }
         }
