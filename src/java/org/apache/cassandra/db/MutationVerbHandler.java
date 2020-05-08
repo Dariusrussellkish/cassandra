@@ -88,7 +88,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
         // execute the read request locally to obtain the tag of the key
         // and extract tag information from the local read
-        TimestampTag tagLocal = new TimestampTag();
+        TimestampTag tagLocal = null;
         try (ReadExecutionController executionController = localRead.executionController();
              UnfilteredPartitionIterator iterator = localRead.executeLocally(executionController)) {
             // first we have to transform it into a PartitionIterator
@@ -119,6 +119,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
                 break;
             }
         }
+        if (tagLocal == null) return true;
         return tagRemote.isLarger(tagLocal);
     }
 
