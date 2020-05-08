@@ -31,8 +31,7 @@ import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.service.ABDColumns;
-import org.apache.cassandra.service.ABDTag;
+import org.apache.cassandra.timetamp.TimestampTag;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -89,7 +88,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
         // execute the read request locally to obtain the tag of the key
         // and extract tag information from the local read
-        ABDTag tagLocal = new ABDTag();
+        TimestampTag tagLocal = new TimestampTag();
         try (ReadExecutionController executionController = localRead.executionController();
              UnfilteredPartitionIterator iterator = localRead.executeLocally(executionController)) {
             // first we have to transform it into a PartitionIterator
@@ -98,25 +97,25 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
                 RowIterator ri = pi.next();
                 while(ri.hasNext()) {
                     Row r = ri.next();
-                    ColumnMetadata colMeta = ri.metadata().getColumn(ByteBufferUtil.bytes(ABDColumns.TAG));
+                    ColumnMetadata colMeta = ri.metadata().getColumn(ByteBufferUtil.bytes(TimestampTag.TimestampColumns.TAG));
                     Cell c = r.getCell(colMeta);
                     if (c == null) {
                         logger.error(r.toString());
                     }else {
-                        tagLocal = ABDTag.deserialize(c.value());
+                        tagLocal = TimestampTag.deserialize(c.value());
                     }
                 }
             }
         }
 
         // extract the tag information from the mutation
-        ABDTag tagRemote = new ABDTag();
+        TimestampTag tagRemote = new TimestampTag();
         Row data = mutation.getPartitionUpdates().iterator().next().getRow(Clustering.EMPTY);
-        ColumnIdentifier ci = new ColumnIdentifier(ABDColumns.TAG,true);
+        ColumnIdentifier ci = new ColumnIdentifier(TimestampTag.TimestampColumns.TAG,true);
 
         for (Cell c : data.cells()) {
             if(c.column().name.equals(ci)) {
-                tagRemote = ABDTag.deserialize(c.value());
+                tagRemote = TimestampTag.deserialize(c.value());
                 break;
             }
         }

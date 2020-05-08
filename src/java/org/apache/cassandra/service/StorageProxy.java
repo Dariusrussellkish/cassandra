@@ -36,6 +36,7 @@ import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.timetamp.TimestampTag;
 import org.apache.cassandra.db.filter.*;
 import org.apache.commons.lang3.StringUtils;
 
@@ -689,54 +690,7 @@ public class StorageProxy implements StorageProxyMBean
     {
         Tracing.trace("Determining replicas for mutation");
 
-        long startTime = System.nanoTime();
-
-        // ABD get
-        // create an read command to fetch the z value corresponding to the key
-        List<SinglePartitionReadCommand> tagReadList = new ArrayList<>();
-        for (IMutation mutation : mutations)
-        {
-            // todo: please note that this is not optimal,
-            // fullPartitionRead generates a read that reading ALL
-            // columns of the key, while all we need is ts
-            TableMetadata tableMetadata = mutation.getPartitionUpdates().iterator().next().metadata();
-            int nowInSec = FBUtilities.nowInSeconds();
-            DecoratedKey  decoratedKey =  mutation.key();
-
-            SinglePartitionReadCommand tagRead = SinglePartitionReadCommand.fullPartitionRead(
-                                                        tableMetadata,
-                                                        nowInSec,
-                                                        decoratedKey
-                                                        );
-
-//            SinglePartitionReadCommand tagRead = SinglePartitionReadCommand.tagRead(
-//                                                        tableMetadata,
-//                                                        nowInSec,
-//                                                        decoratedKey
-//                                                        );
-            tagReadList.add(tagRead);
-        }
-
-        HashMap<String, ABDTag> maxTsMap = new HashMap<>();
-        List<ReadResponse> readList = fetchTagValue(tagReadList, System.nanoTime());
-        PartitionIterator zValueReadResult = prepIterator(tagReadList, readList);
-
-        while(zValueReadResult.hasNext())
-        {
-            RowIterator ri = zValueReadResult.next();
-            ColumnMetadata colMeta = ri.metadata().getColumn(ByteBufferUtil.bytes(ABDColumns.TAG));
-
-            while(ri.hasNext())
-            {
-                Cell c = ri.next().getCell(colMeta);
-                if (c != null) {
-                    ABDTag maxTag = ABDTag.deserialize(c.value());
-                    maxTsMap.put(ri.partitionKey().toString(), maxTag);
-                }
-            }
-        }
-
-        // ABD put
+        // ABD-machine-time put
         // for each incoming mutation,
         // create a mutation for modifying its z value
         // please note that we have 2 assumptions
@@ -750,13 +704,12 @@ public class StorageProxy implements StorageProxyMBean
 
             TableMetadata tableMetadata = mutation.getPartitionUpdates().iterator().next().metadata();
             long timeStamp = FBUtilities.timestampMicros();
-            boolean containsKey = maxTsMap.containsKey(mutation.key().toString());
-            ABDTag curTag =  containsKey ? maxTsMap.get(mutation.key().toString()) : new ABDTag();
 
             mutationBuilder.update(tableMetadata)
                     .timestamp(timeStamp)
                     .row()
-                    .add(ABDColumns.TAG,ABDTag.serialize(curTag.nextTag()));
+                    // here we generate the tag based on the system time call
+                    .add(TimestampTag.TimestampColumns.TAG, TimestampTag.serialize(new TimestampTag(timeStamp)));
 
             Mutation zValueMutation = mutationBuilder.build();
 
@@ -1888,7 +1841,7 @@ public class StorageProxy implements StorageProxyMBean
         // the original fetchRows will be used, this is a workaround
         // to the initialization failure issue
         SinglePartitionReadCommand incomingRead = commands.iterator().next();
-        ColumnMetadata tagMetadata = incomingRead.metadata().getColumn(ByteBufferUtil.bytes(ABDColumns.TAG));
+        ColumnMetadata tagMetadata = incomingRead.metadata().getColumn(ByteBufferUtil.bytes(TimestampTag.TimestampColumns.TAG));
         if(tagMetadata != null)
             return fetchRowsAbd(commands);
 
@@ -1936,6 +1889,16 @@ public class StorageProxy implements StorageProxyMBean
         return PartitionIterators.concat(results);
     }
 
+    /**
+     * Performs a remote read request and waits for a Quorum of responses.
+     * Then takes the highest response and performs a remote write of the
+     * response.
+     * @param commands read commands to be executed
+     * @return PartitionIterator of the reads
+     * @throws UnavailableException
+     * @throws ReadFailureException
+     * @throws ReadTimeoutException
+     */
     private static PartitionIterator fetchRowsAbd(List<SinglePartitionReadCommand> commands)
             throws UnavailableException, ReadFailureException, ReadTimeoutException {
         // first we have to create a full partition read based on the
@@ -1965,8 +1928,8 @@ public class StorageProxy implements StorageProxyMBean
             // first we have to parse the value and tag from the result
             // tagValueResult.next() returns a RowIterator
             RowIterator ri = pi.next();
-            ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(ABDColumns.TAG));
-            ColumnMetadata valMetadata = ri.metadata().getColumn(ByteBufferUtil.bytes(ABDColumns.VAL));
+            ColumnMetadata tagMetaData = ri.metadata().getColumn(ByteBufferUtil.bytes(TimestampTag.TimestampColumns.TAG));
+            ColumnMetadata valMetadata = ri.metadata().getColumn(ByteBufferUtil.bytes(TimestampTag.TimestampColumns.VAL));
 
             assert tagMetaData != null && valMetadata != null;
 
@@ -1974,7 +1937,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 Row r = ri.next();
 
-                ABDTag tag = ABDTag.deserialize(r.getCell(tagMetaData).value());
+                TimestampTag tag = TimestampTag.deserialize(r.getCell(tagMetaData).value());
 
                 String value = "";
                 try{
@@ -1989,8 +1952,9 @@ public class StorageProxy implements StorageProxyMBean
 
                 mutationBuilder.update(tableMetadata)
                         .timestamp(FBUtilities.timestampMicros()).row()
-                        .add(ABDColumns.TAG, ABDTag.serialize(tag))
-                        .add(ABDColumns.VAL, value);
+                        // we keep the tag the same even though it was agreed upon by a quorum
+                        .add(TimestampTag.TimestampColumns.TAG, TimestampTag.serialize(tag))
+                        .add(TimestampTag.TimestampColumns.VAL, value);
 
                 Mutation tvMutation = mutationBuilder.build();
 
@@ -1998,7 +1962,7 @@ public class StorageProxy implements StorageProxyMBean
             }
 
 
-            // then we will have to perform the mutatation we've just generated
+            // then we will have to perform the mutation we've just generated
             mutateDoWrite(mutationList, ConsistencyLevel.QUORUM, System.nanoTime());
         }
 
