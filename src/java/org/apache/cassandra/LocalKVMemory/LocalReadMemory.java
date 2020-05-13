@@ -1,6 +1,6 @@
 package org.apache.cassandra.LocalKVMemory;
 
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.ReadResponse;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -69,7 +69,7 @@ public class LocalReadMemory {
      * @param v the UnfilteredPartitionIterator read result associated with the LogicalTimestamp
      * @see org.apache.cassandra.LocalKVMemory.LogicalTimestamp#compareTo(LogicalTimestamp)
      */
-    synchronized public void put(String key, LogicalTimestamp ts, UnfilteredPartitionIterator v) {
+    synchronized public void put(String key, LogicalTimestamp ts, ReadResponse v) {
         TagReadPair localtv = get(key);
         if (localtv != null) {
             if (localtv.getTag().compareTo(ts) < 0) {
@@ -89,9 +89,9 @@ public class LocalReadMemory {
     public static class TagReadPair implements Comparable<TagReadPair> {
 
         private final LogicalTimestamp tag;
-        private final UnfilteredPartitionIterator value;
+        private final ReadResponse value;
 
-        public TagReadPair(LogicalTimestamp tag, UnfilteredPartitionIterator value) {
+        public TagReadPair(LogicalTimestamp tag, ReadResponse value) {
             this.tag = tag;
             this.value = value;
         }
@@ -100,7 +100,7 @@ public class LocalReadMemory {
             return tag;
         }
 
-        public UnfilteredPartitionIterator getValue() {
+        public ReadResponse getValue() {
             return value;
         }
 

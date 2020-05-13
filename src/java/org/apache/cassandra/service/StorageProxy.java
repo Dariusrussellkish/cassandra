@@ -1796,10 +1796,10 @@ public class StorageProxy implements StorageProxyMBean {
                         UnfilteredPartitionIterator value = responsePair.getResponse().makeIterator(command);
                         valuesToUse.add(UnfilteredPartitionIterators.filter(value, command.nowInSec()));
                         // update local memory
-                        localMemory.put(command.partitionKey().toString(), responsePair.getTimestamp(), value);
+                        localMemory.put(command.partitionKey().toString(), responsePair.getTimestamp(), responsePair.getResponse());
                     } else {
                         // use local tag because it is further ahead than remote quorum
-                        UnfilteredPartitionIterator local = localTag.getValue();
+                        UnfilteredPartitionIterator local = localTag.getValue().makeIterator(command);
                         valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
                     }
                 } else {
@@ -1807,12 +1807,12 @@ public class StorageProxy implements StorageProxyMBean {
                     // set local tag to remote value
                     UnfilteredPartitionIterator value = responsePair.getResponse().makeIterator(command);
                     valuesToUse.add(UnfilteredPartitionIterators.filter(value, command.nowInSec()));
-                    localMemory.put(command.partitionKey().toString(), responsePair.getTimestamp(), value);
+                    localMemory.put(command.partitionKey().toString(), responsePair.getTimestamp(), responsePair.getResponse());
                 }
             } else {
                 // no quorum from external servers
                 if (localTag != null) {
-                    UnfilteredPartitionIterator local = localTag.getValue();
+                    UnfilteredPartitionIterator local = localTag.getValue().makeIterator(command);
                     valuesToUse.add(UnfilteredPartitionIterators.filter(local, command.nowInSec()));
                 } else{
                     // if there is no consensus and no hit in local memory
