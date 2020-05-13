@@ -210,7 +210,6 @@ public class DigestResolver extends ResponseResolver
                     if(tagCell!=null && readingTag!=null){
                         curTag = readingTag;
                     }
-                    logger.debug("adding response {} to maxHeap", curTag.getTime());
                     // add tag to max heap
                     sortedTags.put(new TagResponsePair(curTag, curResponse));
                 }
