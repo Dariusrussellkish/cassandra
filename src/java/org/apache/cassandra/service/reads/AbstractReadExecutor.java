@@ -439,19 +439,15 @@ public abstract class AbstractReadExecutor
             }
         }
         List<TagResponsePair> responses = digestResolver.getResponses();
-
         if(responses != null)
         {
             setAllResults(responses);
         }
-        else
-        {
-            // maxResponse is null, which is possible
-            // when the key we're trying to fetch doesn't
-            // even exist, use the default data result from
-            // digestResolver, which will be empty in this case
-            setResult(digestResolver.getReadResponse());
-        }
+        // maxResponse is null, which is possible
+        // when the key we're trying to fetch doesn't
+        // even exist, use the default data result from
+        // digestResolver, which will be empty in this case
+        setResult(digestResolver.getReadResponse());
     }
 
     public void awaitResponsesBSR() throws ReadTimeoutException

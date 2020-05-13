@@ -1730,10 +1730,10 @@ public class StorageProxy implements StorageProxyMBean {
 
         // execute the tag value read, the result will be the
         // tag value pair with the largest tag
-        List<List<TagResponsePair>> tagValueResultList = new ArrayList<>();
+        List<AbstractReadExecutor> tagValueResultList = new ArrayList<>();
         for (SinglePartitionReadCommand readCommand : tagValueReadList) {
             // These reads may arbitrarily contain local Cassandra DB values
-            List<TagResponsePair> tagValueResult = fetchTagValueWitnesses(readCommand, System.nanoTime());
+            AbstractReadExecutor tagValueResult = fetchTagValueWitnesses(readCommand, System.nanoTime());
             tagValueResultList.add(tagValueResult);
         }
 
@@ -1747,7 +1747,10 @@ public class StorageProxy implements StorageProxyMBean {
         // tag response pairs of a witness quorum, null if no quorum
         TagResponsePair[] responseList = new TagResponsePair[commands.size()];
         for (int i = 0; i < tagValueResultList.size(); i++) {
-            List<TagResponsePair> tagResponseList = tagValueResultList.get(i);
+
+            AbstractReadExecutor read = tagValueResultList.get(i);
+
+            List<TagResponsePair> tagResponseList = read.getAllResults();
 
             // Not sure if this will ever be hit, but better safe than sorry
             if (tagResponseList == null || tagResponseList.size() == 0) {
@@ -1755,7 +1758,7 @@ public class StorageProxy implements StorageProxyMBean {
             }
 
             // We use the first value as the default in case
-            TagResponsePair result = tagResponseList.get(0);
+            TagResponsePair result = null;
             Map<Integer, Integer> witnesses = new ConcurrentHashMap<>();
             for (TagResponsePair tagResponse : tagResponseList) {
                 if (tagResponse == null) {
@@ -1814,7 +1817,8 @@ public class StorageProxy implements StorageProxyMBean {
                 } else{
                     // if there is no consensus and no hit in local memory
                     // we use the first response from remote, which will be an empty PartitionIterator
-                    UnfilteredPartitionIterator response = responsePair.getResponse().makeIterator(command);
+                    AbstractReadExecutor read = tagValueResultList.get(i);
+                    UnfilteredPartitionIterator response = read.getResult().makeIterator(command);
                     PartitionIterator responsePI = UnfilteredPartitionIterators.filter(response, command.nowInSec());
                     valuesToUse.add(responsePI);
                 }
@@ -1823,7 +1827,7 @@ public class StorageProxy implements StorageProxyMBean {
         return PartitionIterators.concat(valuesToUse);
     }
 
-    private static List<TagResponsePair> fetchTagValueWitnesses(SinglePartitionReadCommand command, long queryStartNanoTime)
+    private static AbstractReadExecutor fetchTagValueWitnesses(SinglePartitionReadCommand command, long queryStartNanoTime)
             throws UnavailableException, ReadFailureException, ReadTimeoutException {
         AbstractReadExecutor read = AbstractReadExecutor.getReadExecutor(command, ConsistencyLevel.BSR, queryStartNanoTime);
         read.executeAsyncBSR();
@@ -1831,9 +1835,7 @@ public class StorageProxy implements StorageProxyMBean {
         // gets the f+1 highest value from responses
         read.awaitResponsesTagResponsePairList();
 
-//        assert false : String.format("made TagValue Pair List: %d", read.getAllResults().size());
-
-        return read.getAllResults();
+        return read;
     }
 
     // gets the f+1 highest value
