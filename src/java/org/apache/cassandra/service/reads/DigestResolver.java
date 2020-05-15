@@ -171,12 +171,8 @@ public class DigestResolver extends ResponseResolver
         // check all data responses,
         // extract the one with max z value
 
-        if (responses.size() < ConsistencyLevel.ByzantineFaultTolerance) {
-            return null;
-        }
-
         // Store results in an ArrayList then sort so we can get the (f+1)th highest tag
-        ArrayList<TagResponsePair> tagsToSort = new ArrayList<>(responses.size());
+        ArrayList<TagResponsePair> tagsToSort = new ArrayList<>();
         for (MessageIn<ReadResponse> message : responses)
         {
             ReadResponse curResponse = message.payload;
@@ -214,6 +210,10 @@ public class DigestResolver extends ResponseResolver
                     tagsToSort.add(new TagResponsePair(curTag, curResponse));
                 }
             }
+        }
+
+        if (tagsToSort.size() <= ConsistencyLevel.ByzantineFaultTolerance) {
+            return null;
         }
 
         tagsToSort.sort(Collections.reverseOrder());
