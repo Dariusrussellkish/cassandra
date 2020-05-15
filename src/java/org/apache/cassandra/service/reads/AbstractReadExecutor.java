@@ -472,7 +472,7 @@ public abstract class AbstractReadExecutor
         // when we get here, the consistency level must have been satisfied
         // this function is implemented in digest resolver because the data
         // responses are in it
-        // f+1th heighest response
+        // f+1th highest response
         ReadResponse bsrResponse = digestResolver.getBSRResponse();
 
 

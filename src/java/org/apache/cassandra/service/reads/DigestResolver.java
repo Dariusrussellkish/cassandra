@@ -20,7 +20,6 @@ package org.apache.cassandra.service.reads;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.PriorityBlockingQueue;
 import java.util.Collections;
 import java.util.List;
 
@@ -171,12 +170,13 @@ public class DigestResolver extends ResponseResolver
     {
         // check all data responses,
         // extract the one with max z value
-        ReadResponse maxResponse = null;
 
-        // TODO: find a way to get this from the replication factor
-        // Store results in a maxheap so we can get the (f+1)th highest tag
-        int replicationFactor = 20;
-        PriorityBlockingQueue<TagResponsePair> sortedTags = new PriorityBlockingQueue<>(replicationFactor, Collections.reverseOrder());
+        if (responses.size() < ConsistencyLevel.ByzantineFaultTolerance) {
+            return null;
+        }
+
+        // Store results in an ArrayList then sort so we can get the (f+1)th highest tag
+        ArrayList<TagResponsePair> tagsToSort = new ArrayList<>(responses.size());
         for (MessageIn<ReadResponse> message : responses)
         {
             ReadResponse curResponse = message.payload;
@@ -211,23 +211,14 @@ public class DigestResolver extends ResponseResolver
                         curTag = readingTag;
                     }
                     // add tag to max heap
-                    sortedTags.put(new TagResponsePair(curTag, curResponse));
+                    tagsToSort.add(new TagResponsePair(curTag, curResponse));
                 }
             }
         }
 
-        // remove max values for f+1 iterations
-//        assert sortedTags.size() >= ConsistencyLevel.ByzantineFaultTolerance + 1 :
-//                String.format("Heap is not large enough with only: %d elements", sortedTags.size());
-        for (int i = 0; i < ConsistencyLevel.ByzantineFaultTolerance + 1; i++) {
-            TagResponsePair nthMax = sortedTags.poll();
-            if (nthMax != null)
-            {
-               maxResponse = nthMax.getResponse();
-            }
-        }
+        tagsToSort.sort(Collections.reverseOrder());
 
-        return maxResponse;
+        return tagsToSort.get(ConsistencyLevel.ByzantineFaultTolerance).getResponse();
     }
 
     public boolean isDataPresent()
