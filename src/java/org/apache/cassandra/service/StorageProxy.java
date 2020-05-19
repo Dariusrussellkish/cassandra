@@ -704,8 +704,6 @@ public class StorageProxy implements StorageProxyMBean
         {
             Mutation.SimpleBuilder mutationBuilder = Mutation.simpleBuilder(mutation.getKeyspaceName(), mutation.key());
 
-            assert false : "DecoratedKey: " + mutation.key().toString();
-
             TableMetadata tableMetadata = mutation.getPartitionUpdates().iterator().next().metadata();
             long timeStamp = FBUtilities.timestampMicros();
 
@@ -1911,12 +1909,13 @@ public class StorageProxy implements StorageProxyMBean
         for (SinglePartitionReadCommand readCommand: commands)
         {
             DecoratedKey key = readCommand.partitionKey();
-            assert false : "Decorated key: "+ key.toString();
             String keyString = ByteBufferUtil.bytesToHex(key.getKey());
             keyString = keyString + Hex.encodeHexString(";FABD".getBytes());
             ByteBuffer encodedKeyString = ByteBufferUtil.hexToBytes(keyString);
             DecoratedKey encodedKey = new BufferDecoratedKey(key.getToken(), encodedKeyString);
 
+            assert false : "Decorated key: "+ key.toString();
+            
             SinglePartitionReadCommand tagValueRead =
             SinglePartitionReadCommand.fullPartitionRead(
                     readCommand.metadata(),

@@ -58,7 +58,6 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         } catch (DecoderException e) {
             assert false : "Failed to decode hex string: " + decodedKey;
         }
-        assert false : "Decoded key : " + decodedKey;
         String key = decodedKey.split(";")[0];
         key = Hex.encodeHexString(key.getBytes());
         DecoratedKey parsedKey = new BufferDecoratedKey(encodedKey.getToken(), ByteBufferUtil.hexToBytes(key));
