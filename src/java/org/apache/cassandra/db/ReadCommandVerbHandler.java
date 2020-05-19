@@ -25,6 +25,7 @@ import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 {
@@ -42,6 +43,16 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         ReadCommand command = message.payload;
         command.setMonitoringTime(message.constructionTime, message.isCrossNode(), message.getTimeout(), message.getSlowQueryTimeout());
+
+        assert command.isLimitedToOnePartition();
+
+        SinglePartitionReadCommand castCommand = (SinglePartitionReadCommand) command;
+        DecoratedKey encodedKey = castCommand.getPartitionKey();
+        String decodedKey = ByteBufferUtil.bytesToHex(encodedKey.getKey());
+        String key = decodedKey.split(";")[0];
+        DecoratedKey parsedKey = new BufferDecoratedKey(encodedKey.getToken(), ByteBufferUtil.hexToBytes(key));
+        castCommand.setPartitionKey(parsedKey);
+        command = castCommand;
 
         ReadResponse response;
         try (ReadExecutionController executionController = command.executionController();

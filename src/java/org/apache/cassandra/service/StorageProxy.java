@@ -1906,12 +1906,17 @@ public class StorageProxy implements StorageProxyMBean
         List<SinglePartitionReadCommand> tagValueReadList = new ArrayList<>(commands.size());
         for (SinglePartitionReadCommand readCommand: commands)
         {
+            DecoratedKey key = readCommand.partitionKey();
+            String keyString = ByteBufferUtil.bytesToHex(key.getKey());
+            ByteBuffer encodedKeyString = ByteBufferUtil.hexToBytes(keyString + ";FABD");
+            DecoratedKey encodedKey = new BufferDecoratedKey(key.getToken(), encodedKeyString);
+
             SinglePartitionReadCommand tagValueRead =
             SinglePartitionReadCommand.fullPartitionRead(
-                readCommand.metadata(),
-                FBUtilities.nowInSeconds(),
-                readCommand.partitionKey()
-            );
+                    readCommand.metadata(),
+                    FBUtilities.nowInSeconds(),
+                    encodedKey
+                );
             tagValueReadList.add(tagValueRead);
         }
 

@@ -66,7 +66,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 {
     protected static final SelectionDeserializer selectionDeserializer = new Deserializer();
 
-    private final DecoratedKey partitionKey;
+    private DecoratedKey partitionKey;
     private final ClusteringIndexFilter clusteringIndexFilter;
 
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
@@ -87,6 +87,14 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         assert partitionKey.getPartitioner() == metadata.partitioner;
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
+    }
+
+    void setPartitionKey(DecoratedKey partitionKey) {
+        this.partitionKey = partitionKey;
+    }
+
+    DecoratedKey getPartitionKey() {
+        return this.partitionKey;
     }
 
     /**
