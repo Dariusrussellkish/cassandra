@@ -2019,6 +2019,17 @@ public class StorageProxy implements StorageProxyMBean
         int idx = 0;
         for(ReadResponse rr : responses){
             SinglePartitionReadCommand command = commands.get(idx);
+            DecoratedKey encodedKey = command.getPartitionKey();
+            String decodedKey = ByteBufferUtil.bytesToHex(encodedKey.getKey());
+            try {
+                decodedKey = new String(Hex.decodeHex(decodedKey.toCharArray()));
+            } catch (DecoderException e) {
+                assert false : "Failed to decode hex string: " + decodedKey;
+            }
+            String key = decodedKey.split(";")[0];
+            key = Hex.encodeHexString(key.getBytes());
+            DecoratedKey parsedKey = new BufferDecoratedKey(encodedKey.getToken(), ByteBufferUtil.hexToBytes(key));
+            command.setPartitionKey(parsedKey);
             partitionIterators.add(UnfilteredPartitionIterators.filter(rr.makeIterator(command), command.nowInSec()));
             idx++;
         }
