@@ -1909,6 +1909,7 @@ public class StorageProxy implements StorageProxyMBean
             DecoratedKey key = readCommand.partitionKey();
             String keyString = ByteBufferUtil.bytesToHex(key.getKey());
             ByteBuffer encodedKeyString = ByteBufferUtil.hexToBytes(keyString + ";FABD");
+            assert false : "successfully encoded string";
             DecoratedKey encodedKey = new BufferDecoratedKey(key.getToken(), encodedKeyString);
 
             SinglePartitionReadCommand tagValueRead =
