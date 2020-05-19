@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.db;
 
+import org.apache.commons.codec.DecoderException;
+import org.apache.commons.codec.binary.Hex;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.net.IVerbHandler;
@@ -26,6 +28,8 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
+
+import java.math.BigInteger;
 
 public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 {
@@ -49,7 +53,13 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         SinglePartitionReadCommand castCommand = (SinglePartitionReadCommand) command;
         DecoratedKey encodedKey = castCommand.getPartitionKey();
         String decodedKey = ByteBufferUtil.bytesToHex(encodedKey.getKey());
+        try {
+            decodedKey = new String(Hex.decodeHex(decodedKey.toCharArray()));
+        } catch (DecoderException e) {
+            assert false : "Failed to decode hex string: " + decodedKey;
+        }
         String key = decodedKey.split(";")[0];
+        key = Hex.encodeHexString(key.getBytes());
         DecoratedKey parsedKey = new BufferDecoratedKey(encodedKey.getToken(), ByteBufferUtil.hexToBytes(key));
         castCommand.setPartitionKey(parsedKey);
         command = castCommand;

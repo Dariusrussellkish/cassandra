@@ -18,6 +18,7 @@
 package org.apache.cassandra.service;
 
 import java.lang.management.ManagementFactory;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.file.Paths;
@@ -1908,8 +1909,9 @@ public class StorageProxy implements StorageProxyMBean
         {
             DecoratedKey key = readCommand.partitionKey();
             String keyString = ByteBufferUtil.bytesToHex(key.getKey());
-            ByteBuffer encodedKeyString = ByteBufferUtil.hexToBytes(keyString + ";FABD");
-            assert false : "successfully encoded string";
+            keyString = keyString + ";FABD";
+            keyString = String.format("%040x", new BigInteger(1, keyString.getBytes()));
+            ByteBuffer encodedKeyString = ByteBufferUtil.hexToBytes(keyString);
             DecoratedKey encodedKey = new BufferDecoratedKey(key.getToken(), encodedKeyString);
 
             SinglePartitionReadCommand tagValueRead =
