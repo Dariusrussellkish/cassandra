@@ -62,16 +62,16 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         key = Hex.encodeHexString(key.getBytes());
         DecoratedKey parsedKey = new BufferDecoratedKey(encodedKey.getToken(), ByteBufferUtil.hexToBytes(key));
         castCommand.setPartitionKey(parsedKey);
-        command = castCommand;
 
         ReadResponse response;
-        try (ReadExecutionController executionController = command.executionController();
-             UnfilteredPartitionIterator iterator = command.executeLocally(executionController))
+        try (ReadExecutionController executionController = castCommand.executionController();
+             UnfilteredPartitionIterator iterator = castCommand.executeLocally(executionController))
         {
+
             response = command.createResponse(iterator);
         }
 
-        if (!command.complete())
+        if (!castCommand.complete())
         {
             Tracing.trace("Discarding partial response to {} (timed out)", message.from);
             MessagingService.instance().incrementDroppedMessages(message, message.getLifetimeInMS());

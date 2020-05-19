@@ -100,14 +100,13 @@ public class DigestResolver extends ResponseResolver
         TimestampTag maxTag = new TimestampTag();
         ReadResponse maxResponse = null;
 
-        ColumnIdentifier zIdentifier = new ColumnIdentifier(TimestampTag.TimestampColumns.TAG, true);
         for (MessageIn<ReadResponse> message : responses)
         {
             ReadResponse curResponse = message.payload;
 
             // check if the response is indeed a data response
             // we shouldn't get a digest response here
-            assert curResponse.isDigestResponse() == false;
+            assert !curResponse.isDigestResponse();
 
             // get the partition iterator corresponding to the
             // current data response

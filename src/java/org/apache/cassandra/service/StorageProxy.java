@@ -1915,18 +1915,6 @@ public class StorageProxy implements StorageProxyMBean
             ByteBuffer encodedKeyString = ByteBufferUtil.hexToBytes(keyString);
             DecoratedKey encodedKey = new BufferDecoratedKey(key.getToken(), encodedKeyString);
 
-            String decodedKey = ByteBufferUtil.bytesToHex(encodedKey.getKey());
-            try {
-                decodedKey = new String(Hex.decodeHex(decodedKey.toCharArray()));
-            } catch (DecoderException e) {
-                assert false : "Failed to decode hex string: " + decodedKey;
-            }
-            String key1 = decodedKey.split(";")[0];
-            key1 = Hex.encodeHexString(key1.getBytes());
-            DecoratedKey parsedKey = new BufferDecoratedKey(encodedKey.getToken(), ByteBufferUtil.hexToBytes(key1));
-
-            assert false : "Decorated key: "+ parsedKey.toString() + "|" + key.toString();
-
             SinglePartitionReadCommand tagValueRead =
             SinglePartitionReadCommand.fullPartitionRead(
                     readCommand.metadata(),
