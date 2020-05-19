@@ -34,6 +34,8 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.timetamp.TimestampTag;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.commons.codec.DecoderException;
+import org.apache.commons.codec.binary.Hex;
 
 public class DigestResolver extends ResponseResolver
 {
@@ -110,7 +112,23 @@ public class DigestResolver extends ResponseResolver
 
             // get the partition iterator corresponding to the
             // current data response
-            PartitionIterator pi = UnfilteredPartitionIterators.filter(curResponse.makeIterator(command), command.nowInSec());
+
+            //TODO: strip metadata at this line
+
+            SinglePartitionReadCommand castCommand = (SinglePartitionReadCommand) command;
+            DecoratedKey encodedKey = castCommand.getPartitionKey();
+            String decodedKey = ByteBufferUtil.bytesToHex(encodedKey.getKey());
+            try {
+                decodedKey = new String(Hex.decodeHex(decodedKey.toCharArray()));
+            } catch (DecoderException e) {
+                assert false : "Failed to decode hex string: " + decodedKey;
+            }
+            String key = decodedKey.split(";")[0];
+            key = Hex.encodeHexString(key.getBytes());
+            DecoratedKey parsedKey = new BufferDecoratedKey(encodedKey.getToken(), ByteBufferUtil.hexToBytes(key));
+            castCommand.setPartitionKey(parsedKey);
+
+            PartitionIterator pi = UnfilteredPartitionIterators.filter(curResponse.makeIterator(castCommand), castCommand.nowInSec());
             // get the z value column
             while(pi.hasNext())
             {

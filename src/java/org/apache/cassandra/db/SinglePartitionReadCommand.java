@@ -89,11 +89,11 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         this.clusteringIndexFilter = clusteringIndexFilter;
     }
 
-    void setPartitionKey(DecoratedKey partitionKey) {
+    public void setPartitionKey(DecoratedKey partitionKey) {
         this.partitionKey = partitionKey;
     }
 
-    DecoratedKey getPartitionKey() {
+    public DecoratedKey getPartitionKey() {
         return this.partitionKey;
     }
 
