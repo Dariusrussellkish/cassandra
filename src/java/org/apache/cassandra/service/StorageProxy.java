@@ -39,6 +39,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.cassandra.timetamp.TimestampTag;
 import org.apache.cassandra.db.filter.*;
+import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.lang3.StringUtils;
 
 import org.slf4j.Logger;
@@ -702,6 +703,8 @@ public class StorageProxy implements StorageProxyMBean
         for (IMutation mutation : mutations)
         {
             Mutation.SimpleBuilder mutationBuilder = Mutation.simpleBuilder(mutation.getKeyspaceName(), mutation.key());
+
+            assert false : "DecoratedKey: " + mutation.key().toString();
 
             TableMetadata tableMetadata = mutation.getPartitionUpdates().iterator().next().metadata();
             long timeStamp = FBUtilities.timestampMicros();
@@ -1908,9 +1911,9 @@ public class StorageProxy implements StorageProxyMBean
         for (SinglePartitionReadCommand readCommand: commands)
         {
             DecoratedKey key = readCommand.partitionKey();
+            assert false : "Decorated key: "+ key.toString();
             String keyString = ByteBufferUtil.bytesToHex(key.getKey());
-            keyString = keyString + ";FABD";
-            keyString = String.format("%040x", new BigInteger(1, keyString.getBytes()));
+            keyString = keyString + Hex.encodeHexString(";FABD".getBytes());
             ByteBuffer encodedKeyString = ByteBufferUtil.hexToBytes(keyString);
             DecoratedKey encodedKey = new BufferDecoratedKey(key.getToken(), encodedKeyString);
 
