@@ -39,6 +39,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.cassandra.timetamp.TimestampTag;
 import org.apache.cassandra.db.filter.*;
+import org.apache.commons.codec.DecoderException;
 import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.lang3.StringUtils;
 
@@ -1914,7 +1915,17 @@ public class StorageProxy implements StorageProxyMBean
             ByteBuffer encodedKeyString = ByteBufferUtil.hexToBytes(keyString);
             DecoratedKey encodedKey = new BufferDecoratedKey(key.getToken(), encodedKeyString);
 
-            assert false : "Decorated key: "+ encodedKey.toString();
+            String decodedKey = ByteBufferUtil.bytesToHex(encodedKey.getKey());
+            try {
+                decodedKey = new String(Hex.decodeHex(decodedKey.toCharArray()));
+            } catch (DecoderException e) {
+                assert false : "Failed to decode hex string: " + decodedKey;
+            }
+            String key1 = decodedKey.split(";")[0];
+            key1 = Hex.encodeHexString(key1.getBytes());
+            DecoratedKey parsedKey = new BufferDecoratedKey(encodedKey.getToken(), ByteBufferUtil.hexToBytes(key1));
+
+            assert false : "Decorated key: "+ parsedKey.toString() + "|" + key.toString();
 
             SinglePartitionReadCommand tagValueRead =
             SinglePartitionReadCommand.fullPartitionRead(
