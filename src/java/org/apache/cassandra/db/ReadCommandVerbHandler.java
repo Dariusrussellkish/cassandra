@@ -67,7 +67,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         try (ReadExecutionController executionController = castCommand.executionController();
              UnfilteredPartitionIterator iterator = castCommand.executeLocally(executionController))
         {
-            response = command.createResponse(iterator);
+            response = castCommand.createResponse(iterator);
         }
 
         if (!castCommand.complete())
