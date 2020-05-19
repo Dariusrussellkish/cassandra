@@ -1914,8 +1914,8 @@ public class StorageProxy implements StorageProxyMBean
             ByteBuffer encodedKeyString = ByteBufferUtil.hexToBytes(keyString);
             DecoratedKey encodedKey = new BufferDecoratedKey(key.getToken(), encodedKeyString);
 
-            assert false : "Decorated key: "+ key.toString();
-            
+            assert false : "Decorated key: "+ encodedKey.toString();
+
             SinglePartitionReadCommand tagValueRead =
             SinglePartitionReadCommand.fullPartitionRead(
                     readCommand.metadata(),
